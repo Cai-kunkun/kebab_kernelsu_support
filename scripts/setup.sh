@@ -1,2 +1,31 @@
 #!/usr/bin/env bash
-# setup script (empty)
+
+set -e
+
+echo "== Setting up build environment =="
+
+export ARCH=arm64
+
+KERNEL_DIR="$GITHUB_WORKSPACE/kernel"
+
+cd "$KERNEL_DIR"
+
+echo "Kernel source:"
+pwd
+
+mkdir -p out
+
+echo "Using defconfig:"
+echo "kona_defconfig"
+
+make \
+    O=out \
+    ARCH=arm64 \
+    LLVM=1 \
+    LLVM_IAS=1 \
+    vendor/kona_defconfig
+
+
+echo "Config generated"
+
+grep CONFIG_LOCALVERSION out/.config || true
