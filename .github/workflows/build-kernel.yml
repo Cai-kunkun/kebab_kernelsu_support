@@ -1,0 +1,91 @@
+name: Build kebab kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Build profile
+        required: true
+        default: ksu-susfs
+        type: choice
+        options:
+          - official
+          - ksu-susfs
+          - both
+
+  push:
+    branches:
+      - main
+      - master
+
+  schedule:
+    - cron: "0 0 * * 0"
+
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        profile:
+          - ${{ github.event.inputs.profile || 'official' }}
+
+    steps:
+
+    - name: Checkout builder
+      uses: actions/checkout@v4
+
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          bc \
+          bison \
+          flex \
+          build-essential \
+          ccache \
+          curl \
+          git \
+          libssl-dev \
+          libelf-dev \
+          python3 \
+          rsync
+
+
+    - name: Setup ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: kernel-kebab
+
+
+    - name: Clone kernel source
+      run: |
+        git clone \
+          --depth=1 \
+          -b lineage-23.2 \
+          https://github.com/LineageOS/android_kernel_oneplus_sm8250 \
+          kernel
+
+
+    - name: Build kernel
+      env:
+        PROFILE: ${{ matrix.profile }}
+      run: |
+        chmod +x scripts/*.sh
+
+        ./scripts/setup.sh
+
+        ./scripts/build.sh
+
+
+    - name: Upload kernel image
+      uses: actions/upload-artifact@v4
+      with:
+        name: kebab-${{ matrix.profile }}
+        path: |
+          kernel/out/arch/arm64/boot/Image.gz*
