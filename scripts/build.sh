@@ -32,7 +32,14 @@ export CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32}"
 
 cd kernel_source
 
-echo "=== 生成 defconfig: ${KERNEL_DEFCONFIG} ${KERNEL_DEFCONFIG_FRAGMENTS} ==="
+echo "=== 禁用不兼容的 schgm-flash 驱动 ==="
+# struct smb_charger 在这份 tree 里对该驱动只有前向声明、没有完整定义,
+# 说明这个文件跟当前 tree 不匹配,直接禁用编译入口(而不是猜 Kconfig 符号名)
+if [ -f drivers/power/supply/qcom/Makefile ]; then
+  sed -i '/schgm-flash\.o/d' drivers/power/supply/qcom/Makefile
+fi
+
+echo "=== 生成 defconfig: ${KERNEL_DEFCONFIG} ${KERNEL_DEFCONFIG_FRAGMENTS} ===" 
 # 注意: CC/CROSS_COMPILE 必须在命令行显式传入,不能只靠 export!
 # 内核顶层 Makefile 里是 `CC = $(CROSS_COMPILE)gcc` 这种直接赋值,
 # 优先级比 shell export 的环境变量高,只 export 会被这行覆盖掉。
