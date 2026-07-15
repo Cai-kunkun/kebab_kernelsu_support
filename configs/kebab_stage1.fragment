@@ -1,11 +1,27 @@
 # OnePlus 8T kebab Stage1 vanilla kernel fragment
-# OPLUS vendor driver dependencies
+#
+# Purpose:
+#   Enable required OPLUS vendor drivers for clean vanilla build.
+#
+# This fragment is merged on top of:
+#   vendor/kona_defconfig
+#
+# Do not modify original defconfig.
 
+
+#
 # OPLUS charger
+#
 CONFIG_OPLUS_SM8250_CHARGER=y
 
+
+#
 # OPLUS fingerprint
+#
 CONFIG_OPLUS_FINGERPRINT=y
 
+
+#
 # OPLUS touchpanel
+#
 CONFIG_TOUCHPANEL_OPLUS=y
