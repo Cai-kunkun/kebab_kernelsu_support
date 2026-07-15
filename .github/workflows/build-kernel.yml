@@ -78,11 +78,14 @@ jobs:
       run: |
         cd kernel
 
-        mkdir -p out
-
         echo "== Clean source tree =="
 
         make mrproper
+
+
+        echo "== Create output directory =="
+
+        mkdir -p out
 
 
         echo "== Generate defconfig =="
@@ -108,7 +111,7 @@ jobs:
           --disable CONFIG_SCHGM_FLASH || true
 
 
-        echo "== Sync config =="
+        echo "== Update config =="
 
         make \
           O=out \
@@ -121,15 +124,14 @@ jobs:
         grep SCHGM out/.config || true
 
 
-        echo "========== CONFIG CHECK =========="
+        echo "========== ARM64 CONFIG =========="
 
-        test -f out/.config
+        grep CONFIG_ARM64 out/.config || true
 
 
     - name: Build kernel
       env:
         PROFILE: ${{ matrix.profile }}
-        KCONFIG_NOSILENTUPDATE: 1
       run: |
 
         chmod +x scripts/*.sh

@@ -24,8 +24,15 @@ echo "== Verify config =="
 grep CONFIG_ARM64 "$OUT_DIR/.config" || true
 
 
-echo "== Start compilation =="
+echo "== Sync kernel config =="
 
+make \
+    O="$OUT_DIR" \
+    ARCH=arm64 \
+    olddefconfig
+
+
+echo "== Start compilation =="
 
 make \
     O="$OUT_DIR" \
@@ -38,6 +45,5 @@ make \
 
 
 echo "== Build finished =="
-
 
 ls -lh "$OUT_DIR/arch/arm64/boot/"
