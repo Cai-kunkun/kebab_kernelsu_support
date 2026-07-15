@@ -1,0 +1,48 @@
+name: Build kernel (stage 1 - vanilla)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt-get clean
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential ccache curl flex \
+            git libncurses-dev libssl-dev libelf-dev \
+            python3 python3-pip rsync unzip zip \
+            device-tree-compiler
+
+      - name: Run setup.sh
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/setup.sh
+
+      - name: Run build.sh
+        run: ./scripts/build.sh
+
+      - name: Upload build log (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+
+      - name: Upload kernel Image (on success)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image
+          path: kernel_source/out/arch/arm64/boot/Image
