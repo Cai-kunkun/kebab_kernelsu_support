@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# empty placeholder
-# 实际编译命令(defconfig + make), 本地和 CI 都能调用同一份
-#!/usr/bin/env bash
 # 编译内核 (stage1: 仅原生编译,不含 KernelSU/SUSFS)
 # 用法: ./scripts/build.sh
 set -euo pipefail
@@ -17,7 +14,15 @@ if [ ! -d "kernel_source" ]; then
   exit 1
 fi
 
-export PATH="${ROOT_DIR}/${TOOLCHAIN_DIR}/bin:${PATH}"
+
+# 注意: toolchain 放在 PATH 最后面,不要放最前面!
+# proton-clang 自带未加前缀的老版本 ld/as/ar,如果放在 PATH 最前面会覆盖系统的 ld,
+# 导致编译 host 端工具(如 fixdep)时,老 ld 无法识别新版 glibc 的 .relr.dyn 重定位段而报错。
+# 带 aarch64-linux-gnu- 前缀的交叉编译工具系统里没有,依然会正确从 toolchain 里找到。
+export PATH="${PATH}:${ROOT_DIR}/${TOOLCHAIN_DIR}/bin"
+export HOSTCC=gcc
+export HOSTCXX=g++
+export HOSTLD=ld
 export ARCH="${KERNEL_ARCH}"
 export SUBARCH="${KERNEL_ARCH}"
 export CC="${CC}"
