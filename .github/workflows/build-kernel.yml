@@ -40,6 +40,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
+
         sudo apt install -y \
           bc \
           bison \
@@ -66,26 +67,42 @@ jobs:
     - name: Clone kernel source
       run: |
         git clone \
+          --depth=1 \
+          -b lineage-23.2 \
           https://github.com/LineageOS/android_kernel_oneplus_sm8250 \
           kernel
 
-        cd kernel
 
-        git checkout lineage-23.2
-
-        echo "========== Kernel commit =========="
-        git rev-parse HEAD
-
-
-    - name: Verify qcom driver consistency
+    - name: Patch defconfig
       run: |
         cd kernel
 
-        echo "schgm-flash:"
-        git log -1 -- drivers/power/supply/qcom/schgm-flash.c
+        mkdir -p out
 
-        echo "smb-lib:"
-        git log -1 -- drivers/power/supply/qcom/smb-lib.h
+        make \
+          O=out \
+          ARCH=arm64 \
+          vendor/kona_defconfig
+
+        echo "Disable incompatible schgm flash driver"
+
+        scripts/config \
+          --disable CONFIG_QCOM_SCHGM
+
+        scripts/config \
+          --disable CONFIG_QCOM_SCHGM_FLASH
+
+        scripts/config \
+          --disable CONFIG_SCHGM_FLASH
+
+        make \
+          O=out \
+          ARCH=arm64 \
+          olddefconfig
+
+
+        echo "========== SCHGM CONFIG =========="
+        grep SCHGM out/.config || true
 
 
     - name: Build kernel
@@ -94,8 +111,6 @@ jobs:
       run: |
 
         chmod +x scripts/*.sh
-
-        ./scripts/setup.sh
 
         ./scripts/build.sh
 
