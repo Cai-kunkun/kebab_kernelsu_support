@@ -1,55 +1,198 @@
 #!/usr/bin/env bash
-# 诊断: 找出链接报错里那些 oplus/qcom 私有符号到底定义在哪、被哪一层 Makefile/Kconfig 挡住了
-# 用法: ./scripts/diagnose.sh (在 setup.sh 之后, build.sh 之前运行)
+# 诊断: 找出链接报错里的 oplus/qcom 私有符号定义位置以及对应 Makefile/Kconfig 开关
+# 用法: ./scripts/diagnose.sh
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
+
 source configs/kernel_source.env
 source configs/toolchain.env
 
 cd kernel_source
+
 export PATH="${PATH}:${ROOT_DIR}/${TOOLCHAIN_DIR}/bin"
 
-echo "===================================================="
-echo "=== 先生成一次 .config,方便后面查 CONFIG 开关状态 ==="
-make O=out ARCH="${KERNEL_ARCH}" CC="${CC}" CLANG_TRIPLE="${CLANG_TRIPLE}" \
-  CROSS_COMPILE="${CROSS_COMPILE}" CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32}" \
-  ${KERNEL_DEFCONFIG} ${KERNEL_DEFCONFIG_FRAGMENTS} > /dev/null 2>&1 || echo "(defconfig 生成失败,忽略,继续诊断)"
 
-# 关键几个符号所在的目录,顺着往上查每一层 Makefile 是怎么把这个目录/文件包含进来的
+REPORT="../diagnose_report.log"
+
+exec > >(tee "${REPORT}") 2>&1
+
+
+echo "===================================================="
+echo " Kernel Diagnose Report"
+echo "===================================================="
+
+
+echo
+echo "=== 生成 .config ==="
+
+make \
+  O=out \
+  ARCH="${KERNEL_ARCH}" \
+  CC="${CC}" \
+  CLANG_TRIPLE="${CLANG_TRIPLE}" \
+  CROSS_COMPILE="${CROSS_COMPILE}" \
+  CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32}" \
+  ${KERNEL_DEFCONFIG} ${KERNEL_DEFCONFIG_FRAGMENTS} \
+  > /dev/null 2>&1 || echo "(defconfig失败,继续诊断)"
+
+
+echo
+echo "===================================================="
+echo "=== 搜索关键 undefined symbol 定义位置 ==="
+
+
+declare -a SYMBOLS=(
+  "get_project"
+  "get_boot_mode"
+  "get_eng_version"
+  "oplus_gauge_init"
+  "switch_to_otg_mode"
+  "msm_drm_notifier_call_chain"
+  "switch_headset_state"
+  "opticalfp_irq_handler_register"
+)
+
+
+for sym in "${SYMBOLS[@]}"; do
+
+echo
+echo "----------------------------------------------------"
+echo " Symbol: ${sym}"
+echo "----------------------------------------------------"
+
+
+echo "[函数定义]"
+grep -R \
+  -n \
+  -E "^[a-zA-Z_].*${sym}[[:space:]]*\(" \
+  . \
+  --include="*.c" \
+  --include="*.h" \
+  2>/dev/null || echo "未找到定义"
+
+
+echo
+echo "[EXPORT_SYMBOL]"
+grep -R \
+  -n \
+  "EXPORT_SYMBOL.*${sym}" \
+  . \
+  --include="*.c" \
+  2>/dev/null || echo "未找到导出"
+
+
+echo
+echo "[所有引用]"
+grep -R \
+  -n \
+  "${sym}" \
+  . \
+  --include="*.c" \
+  --include="*.h" \
+  2>/dev/null | head -20 || true
+
+
+done
+
+
+
+echo
+echo "===================================================="
+echo "=== Makefile/Kconfig 路径分析 ==="
+
+
 declare -A SYMBOL_DIR=(
-  ["get_boot_mode"]="drivers/power/oplus/charger_ic"
+  ["get_project"]="drivers/power/oplus"
+  ["get_boot_mode"]="drivers/power/oplus"
+  ["get_eng_version"]="drivers/power/oplus"
   ["oplus_gauge_init"]="drivers/power/oplus"
   ["switch_to_otg_mode"]="drivers/power/oplus"
   ["msm_drm_notifier_call_chain"]="techpack/display/oplus"
+  ["switch_headset_state"]="sound"
+  ["opticalfp_irq_handler_register"]="drivers"
 )
 
+
 for sym in "${!SYMBOL_DIR[@]}"; do
-  dir="${SYMBOL_DIR[$sym]}"
-  echo "===================================================="
-  echo "=== 符号 ${sym} 所在目录: ${dir} ==="
-  cur="${dir}"
-  # 从该目录开始,一路往上查每一级的 Makefile 里跟这个子目录名相关的行
-  while [ "${cur}" != "." ] && [ -n "${cur}" ]; do
+
+dir="${SYMBOL_DIR[$sym]}"
+
+echo
+echo "===================================================="
+echo "=== ${sym}"
+echo "目录: ${dir}"
+echo "===================================================="
+
+
+if [ ! -d "${dir}" ]; then
+    echo "目录不存在"
+    continue
+fi
+
+
+cur="${dir}"
+
+
+while [ "${cur}" != "." ] && [ -n "${cur}" ]; do
+
     parent="$(dirname "${cur}")"
     childname="$(basename "${cur}")"
+
+
     if [ -f "${parent}/Makefile" ]; then
-      echo "--- ${parent}/Makefile 里跟 '${childname}' 相关的行 ---"
-      grep -n "${childname}" "${parent}/Makefile" 2>/dev/null || echo "  (没找到,可能是通过 Kconfig 目录里的其它机制引入的)"
+
+        echo "--- ${parent}/Makefile ---"
+
+        grep -n "${childname}" \
+          "${parent}/Makefile" \
+          2>/dev/null || true
+
     fi
+
+
     if [ -f "${parent}/Kconfig" ]; then
-      echo "--- ${parent}/Kconfig 里跟 '${childname}' 相关的行 ---"
-      grep -n -i "${childname}" "${parent}/Kconfig" 2>/dev/null || true
+
+        echo "--- ${parent}/Kconfig ---"
+
+        grep -n -i "${childname}" \
+          "${parent}/Kconfig" \
+          2>/dev/null || true
+
     fi
+
+
     cur="${parent}"
-  done
+
 done
 
+done
+
+
+
+echo
 echo "===================================================="
-echo "=== 当前 .config 里 OPLUS/OPPO 相关开关状态 ==="
+echo "=== 当前 CONFIG 状态 ==="
+
 if [ -f out/.config ]; then
-  grep -i "config_oplus\|config_oppo" out/.config | head -60
+
+grep -i \
+  -E "CONFIG_(OPLUS|OPPO|MSM|QCOM|DRM)" \
+  out/.config \
+  | head -120
+
 else
-  echo "(out/.config 不存在,defconfig 生成可能失败了,往上翻看报错)"
+
+echo "out/.config 不存在"
+
 fi
+
+
+
+echo
+echo "===================================================="
+echo "诊断完成:"
+echo "${REPORT}"
+echo "===================================================="
