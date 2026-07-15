@@ -15,11 +15,8 @@ on:
 
   push:
     branches:
-      - main
       - master
-
-  schedule:
-    - cron: "0 0 * * 0"
+      - main
 
 
 jobs:
@@ -34,7 +31,6 @@ jobs:
         profile:
           - ${{ github.event.inputs.profile || 'official' }}
 
-
     steps:
 
     - name: Checkout builder
@@ -44,22 +40,21 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-
         sudo apt install -y \
           bc \
           bison \
           flex \
           build-essential \
           ccache \
+          clang \
+          lld \
+          llvm \
           curl \
           git \
           libssl-dev \
           libelf-dev \
           python3 \
-          rsync \
-          clang \
-          lld \
-          llvm
+          rsync
 
 
     - name: Setup ccache
@@ -71,111 +66,43 @@ jobs:
     - name: Clone kernel source
       run: |
         git clone \
-          --depth=1 \
-          -b lineage-23.2 \
           https://github.com/LineageOS/android_kernel_oneplus_sm8250 \
           kernel
 
-
-    - name: Show kernel information
-      run: |
         cd kernel
 
-        echo "========== Kernel information =========="
+        git checkout lineage-23.2
 
-        echo "Commit:"
+        echo "========== Kernel commit =========="
         git rev-parse HEAD
 
-        echo
 
-        echo "Branch:"
-        git branch --show-current
-
-        echo
-
-        echo "========== QCOM driver check =========="
-
-        echo "smb_charger:"
-        grep -R "struct smb_charger" -n drivers/power/supply/qcom/smb-lib.h || true
-
-        echo
-
-        echo "smb_irq_data:"
-        grep -R "struct smb_irq_data" -n drivers/power/supply/qcom/ || true
-
-        echo
-
-        echo "smblib_read:"
-        grep -R "smblib_read" -n drivers/power/supply/qcom/smb-lib.h || true
-
-        echo
-
-        echo "========== Toolchain =========="
-        clang --version
-        ld.lld --version
-
-
-    - name: Patch qcom schgm-flash include
+    - name: Verify qcom driver consistency
       run: |
         cd kernel
 
-        echo "========== Before patch =========="
+        echo "schgm-flash:"
+        git log -1 -- drivers/power/supply/qcom/schgm-flash.c
 
-        grep -n "smb-lib.h" \
-          drivers/power/supply/qcom/schgm-flash.c || true
-
-
-        if ! grep -q 'include "smb-lib.h"' \
-          drivers/power/supply/qcom/schgm-flash.c
-        then
-
-          sed -i \
-          '/include "schgm-flash.h"/a #include "smb-lib.h"' \
-          drivers/power/supply/qcom/schgm-flash.c
-
-        fi
-
-
-        echo "========== After patch =========="
-
-        grep -n "smb-lib.h" \
-          drivers/power/supply/qcom/schgm-flash.c || true
-
+        echo "smb-lib:"
+        git log -1 -- drivers/power/supply/qcom/smb-lib.h
 
 
     - name: Build kernel
       env:
         PROFILE: ${{ matrix.profile }}
-
       run: |
 
         chmod +x scripts/*.sh
 
-
         ./scripts/setup.sh
-
 
         ./scripts/build.sh
 
 
-
-    - name: Verify output
-      if: always()
-      run: |
-
-        echo "========== Kernel output =========="
-
-        ls -lah kernel/out/arch/arm64/boot/ || true
-
-
-
     - name: Upload kernel image
-      if: success()
       uses: actions/upload-artifact@v4
-
       with:
-
         name: kebab-${{ matrix.profile }}
-
         path: |
           kernel/out/arch/arm64/boot/Image.gz*
