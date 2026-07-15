@@ -3,26 +3,20 @@
 set -e
 
 export ARCH=arm64
+export KCONFIG_NOSILENTUPDATE=1
 
 KERNEL_DIR="$GITHUB_WORKSPACE/kernel"
 OUT_DIR="$KERNEL_DIR/out"
 
-
 echo "== Building kernel =="
-
 
 cd "$KERNEL_DIR"
 
 
-echo "== Verify config =="
-
-test -f "$OUT_DIR/.config" || {
-    echo "Missing out/.config"
+if [ ! -f "$OUT_DIR/.config" ]; then
+    echo "Missing kernel config"
     exit 1
-}
-
-
-echo "== Start compilation =="
+fi
 
 
 make \
@@ -36,8 +30,5 @@ make \
 
 
 echo "== Build finished =="
-
-
-echo "== Kernel output =="
 
 ls -lh "$OUT_DIR/arch/arm64/boot/"
