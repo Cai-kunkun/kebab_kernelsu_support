@@ -33,7 +33,12 @@ export CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32}"
 cd kernel_source
 
 echo "=== 生成 defconfig: ${KERNEL_DEFCONFIG} ${KERNEL_DEFCONFIG_FRAGMENTS} ==="
-make O=out ARCH="${ARCH}" ${KERNEL_DEFCONFIG} ${KERNEL_DEFCONFIG_FRAGMENTS}
+# 注意: CC/CROSS_COMPILE 必须在命令行显式传入,不能只靠 export!
+# 内核顶层 Makefile 里是 `CC = $(CROSS_COMPILE)gcc` 这种直接赋值,
+# 优先级比 shell export 的环境变量高,只 export 会被这行覆盖掉。
+make O=out ARCH="${ARCH}" CC="${CC}" CLANG_TRIPLE="${CLANG_TRIPLE}" \
+  CROSS_COMPILE="${CROSS_COMPILE}" CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32}" \
+  ${KERNEL_DEFCONFIG} ${KERNEL_DEFCONFIG_FRAGMENTS}
 
 echo "=== 开始编译 Image ==="
 make O=out ARCH="${ARCH}" CC="${CC}" CLANG_TRIPLE="${CLANG_TRIPLE}" \
