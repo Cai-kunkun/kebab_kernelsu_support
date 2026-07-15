@@ -30,6 +30,9 @@ jobs:
           chmod +x scripts/*.sh
           ./scripts/setup.sh
 
+      - name: Diagnose missing symbols
+        run: ./scripts/diagnose.sh
+
       - name: Run build.sh
         run: ./scripts/build.sh
 
