@@ -58,8 +58,8 @@ jobs:
           python3 \
           rsync \
           clang \
-          llvm \
-          lld
+          lld \
+          llvm
 
 
     - name: Setup ccache
@@ -77,57 +77,69 @@ jobs:
           kernel
 
 
+    - name: Show kernel information
+      run: |
         cd kernel
-
 
         echo "========== Kernel information =========="
 
         echo "Commit:"
         git rev-parse HEAD
 
+        echo
+
         echo "Branch:"
-        git branch
+        git branch --show-current
 
+        echo
 
-        echo ""
-        echo "========== QCOM driver history =========="
+        echo "========== QCOM driver check =========="
 
+        echo "smb_charger:"
+        grep -R "struct smb_charger" -n drivers/power/supply/qcom/smb-lib.h || true
 
-        echo "schgm-flash.c:"
-        git log --oneline -- drivers/power/supply/qcom/schgm-flash.c | head -5 || true
+        echo
 
+        echo "smb_irq_data:"
+        grep -R "struct smb_irq_data" -n drivers/power/supply/qcom/ || true
 
-        echo ""
-        echo "smb-lib.h:"
-        git log --oneline -- drivers/power/supply/qcom/smb-lib.h | head -5 || true
+        echo
 
-
-        echo ""
-        echo "========== Symbol check =========="
-
-
-        echo "smb_charger definition:"
-        grep -n "struct smb_charger {" \
-          drivers/power/supply/qcom/smb-lib.h || true
-
-
-        echo ""
-        echo "smb_irq_data definition:"
-        grep -R "struct smb_irq_data {" \
-          drivers/power/supply/qcom/ || true
-
-
-        echo ""
         echo "smblib_read:"
-        grep -n "smblib_read" \
-          drivers/power/supply/qcom/smb-lib.h || true
+        grep -R "smblib_read" -n drivers/power/supply/qcom/smb-lib.h || true
 
+        echo
 
-        echo ""
         echo "========== Toolchain =========="
-
         clang --version
         ld.lld --version
+
+
+    - name: Patch qcom schgm-flash include
+      run: |
+        cd kernel
+
+        echo "========== Before patch =========="
+
+        grep -n "smb-lib.h" \
+          drivers/power/supply/qcom/schgm-flash.c || true
+
+
+        if ! grep -q 'include "smb-lib.h"' \
+          drivers/power/supply/qcom/schgm-flash.c
+        then
+
+          sed -i \
+          '/include "schgm-flash.h"/a #include "smb-lib.h"' \
+          drivers/power/supply/qcom/schgm-flash.c
+
+        fi
+
+
+        echo "========== After patch =========="
+
+        grep -n "smb-lib.h" \
+          drivers/power/supply/qcom/schgm-flash.c || true
 
 
 
@@ -136,17 +148,23 @@ jobs:
         PROFILE: ${{ matrix.profile }}
 
       run: |
+
         chmod +x scripts/*.sh
 
+
         ./scripts/setup.sh
+
 
         ./scripts/build.sh
 
 
 
-    - name: Check kernel output
+    - name: Verify output
       if: always()
       run: |
+
+        echo "========== Kernel output =========="
+
         ls -lah kernel/out/arch/arm64/boot/ || true
 
 
@@ -154,7 +172,10 @@ jobs:
     - name: Upload kernel image
       if: success()
       uses: actions/upload-artifact@v4
+
       with:
+
         name: kebab-${{ matrix.profile }}
+
         path: |
           kernel/out/arch/arm64/boot/Image.gz*
