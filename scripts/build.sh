@@ -117,6 +117,17 @@ if [ -f techpack/display/msm/msm_drv.c ]; then
 fi
 
 
+# --------------------------------------------------
+# Fix MSM DRM strnstr call
+# --------------------------------------------------
+
+echo "=== 修复 MSM DRM strnstr 调用 ==="
+
+if [ -f drivers/gpu/drm/msm/msm_drv.c ]; then
+    sed -i 's/strnstr(dev_name(dev), "mdp")/strstr(dev_name(dev), "mdp")/g' drivers/gpu/drm/msm/msm_drv.c
+fi
+
+
 
 # --------------------------------------------------
 # Merge fragment
