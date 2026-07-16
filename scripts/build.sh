@@ -83,18 +83,14 @@ fi
 
 
 # --------------------------------------------------
-# Fix smem header path and uaccess
+# Fix OPLUS fingerprint driver headers
 # --------------------------------------------------
 
-echo "=== 修复 smem.h 头文件路径 ==="
+echo "=== 修复 OPLUS 指纹驱动头文件 ==="
 
 if [ -f drivers/input/oplus_fp_drivers/oplus_fp_common/oplus_fp_common.c ]; then
     sed -i 's|<soc/qcom/smem.h>|<linux/soc/qcom/smem.h>|g' drivers/input/oplus_fp_drivers/oplus_fp_common/oplus_fp_common.c
-fi
 
-echo "=== 修复 copy_to_user/copy_from_user 头文件 ==="
-
-if [ -f drivers/input/oplus_fp_drivers/oplus_fp_common/oplus_fp_common.c ]; then
     if ! grep -q "#include <linux/uaccess.h>" drivers/input/oplus_fp_drivers/oplus_fp_common/oplus_fp_common.c; then
         sed -i '/#include <linux\/mutex.h>/a #include <linux/uaccess.h>' drivers/input/oplus_fp_drivers/oplus_fp_common/oplus_fp_common.c
     fi
