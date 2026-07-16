@@ -82,6 +82,17 @@ if [ -f drivers/power/supply/qcom/Makefile ]; then
 fi
 
 
+# --------------------------------------------------
+# Fix smem header path
+# --------------------------------------------------
+
+echo "=== 修复 smem.h 头文件路径 ==="
+
+if [ -f drivers/input/oplus_fp_drivers/oplus_fp_common/oplus_fp_common.c ]; then
+    sed -i 's|<soc/qcom/smem.h>|<linux/soc/qcom/smem.h>|g' drivers/input/oplus_fp_drivers/oplus_fp_common/oplus_fp_common.c
+fi
+
+
 
 # --------------------------------------------------
 # Merge fragment
