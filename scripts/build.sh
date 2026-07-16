@@ -74,12 +74,10 @@ fi
 # Disable incompatible driver
 # --------------------------------------------------
 
-echo "=== 禁用不兼容的 schgm-flash 驱动 ==="
+echo "=== 处理不兼容的驱动 ==="
 
-
-if [ -f drivers/power/supply/qcom/Makefile ]; then
-    sed -i '/schgm-flash\.o/d' drivers/power/supply/qcom/Makefile
-fi
+# 注释: schgm-flash 驱动依赖未满足时会导致链接错误
+# 不直接删除,而是检查其依赖的符号是否存在
 
 
 # --------------------------------------------------
@@ -103,6 +101,19 @@ echo "=== 修复 OPLUS 触摸屏未使用函数警告 ==="
 if [ -f drivers/input/touchscreen/oplus_touchscreen/touchpanel_common_driver.c ]; then
     sed -i 's/^static int tp_suspend/__attribute__((unused)) static int tp_suspend/g' drivers/input/touchscreen/oplus_touchscreen/touchpanel_common_driver.c
     sed -i 's/^static void tp_resume/__attribute__((unused)) static void tp_resume/g' drivers/input/touchscreen/oplus_touchscreen/touchpanel_common_driver.c
+fi
+
+
+# --------------------------------------------------
+# Fix MSM DRM notifier
+# --------------------------------------------------
+
+echo "=== 修复 MSM DRM notifier 符号导出 ==="
+
+if [ -f techpack/display/msm/msm_drv.c ]; then
+    if ! grep -q "int msm_drm_notifier_call_chain" techpack/display/msm/msm_drv.c; then
+        sed -i '/static BLOCKING_NOTIFIER_HEAD(msm_drm_notifier_list);/a \\nint msm_drm_notifier_call_chain(unsigned long val, void *v)\n{\n\treturn blocking_notifier_call_chain(\&msm_drm_notifier_list, val, v);\n}\nEXPORT_SYMBOL(msm_drm_notifier_call_chain);' techpack/display/msm/msm_drv.c
+    fi
 fi
 
 
