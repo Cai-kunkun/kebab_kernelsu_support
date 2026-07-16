@@ -10,30 +10,37 @@
 
 
 #
+# Qualcomm dependencies
+#
+
+CONFIG_QCOM_SMEM=y
+
+
+#
 # OPLUS charger
 #
+
 CONFIG_OPLUS_SM8250_CHARGER=y
 
 
 #
 # OPLUS fingerprint
 #
+
 CONFIG_OPLUS_FINGERPRINT=y
 
 
 #
 # OPLUS touchpanel
 #
+
 CONFIG_TOUCHPANEL_OPLUS=y
 
 
 #
-# Qualcomm SMEM dependency
+# OPLUS project information
 #
-# Required by:
-#   drivers/input/oplus_fp_drivers/oplus_fp_common/
-#
-# Missing header:
-#   soc/qcom/smem.h
-#
-CONFIG_QCOM_SMEM=y
+
+CONFIG_OPLUS_SYSTEM_KERNEL=y
+CONFIG_OPLUS_FEATURE_OPROJECT=y
+CONFIG_OPLUS_FEATURE_PROJECTINFO=y

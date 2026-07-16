@@ -4,11 +4,14 @@
 
 set -euo pipefail
 
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+
 source configs/kernel_source.env
 source configs/toolchain.env
+
 
 
 if [ ! -d "kernel_source" ]; then
@@ -17,10 +20,10 @@ if [ ! -d "kernel_source" ]; then
 fi
 
 
-# 注意: toolchain 放在 PATH 最后面,不要放最前面!
-# proton-clang 自带未加前缀的老版本 ld/as/ar,
-# 如果放在 PATH 最前面会覆盖系统 ld,
-# 导致编译 host 工具失败。
+
+# 注意:
+# toolchain 放在 PATH 最后面
+# 避免 proton-clang 自带旧 binutils 覆盖系统 ld/as/ar
 
 export PATH="${PATH}:${ROOT_DIR}/${TOOLCHAIN_DIR}/bin"
 
@@ -28,8 +31,10 @@ export HOSTCC=gcc
 export HOSTCXX=g++
 export HOSTLD=ld
 
+
 export ARCH="${KERNEL_ARCH}"
 export SUBARCH="${KERNEL_ARCH}"
+
 
 export CC="${CC}"
 export CLANG_TRIPLE="${CLANG_TRIPLE}"
@@ -37,10 +42,19 @@ export CROSS_COMPILE="${CROSS_COMPILE}"
 export CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32}"
 
 
+
 cd kernel_source
 
 
+#
+# 创建输出目录
+#
+mkdir -p out
+
+
+
 echo "=== 禁用不兼容的 schgm-flash 驱动 ==="
+
 
 if [ -f drivers/power/supply/qcom/Makefile ]; then
   sed -i '/schgm-flash\.o/d' drivers/power/supply/qcom/Makefile
@@ -50,7 +64,9 @@ fi
 
 echo "=== 合并 Stage1 fragment ==="
 
+
 FRAGMENT_FILE="../configs/kebab_stage1.fragment"
+
 
 if [ ! -f "${FRAGMENT_FILE}" ]; then
   echo "错误: ${FRAGMENT_FILE} 不存在"
@@ -58,10 +74,12 @@ if [ ! -f "${FRAGMENT_FILE}" ]; then
 fi
 
 
+
 if [ ! -f scripts/kconfig/merge_config.sh ]; then
   echo "错误: scripts/kconfig/merge_config.sh 不存在"
   exit 1
 fi
+
 
 
 bash scripts/kconfig/merge_config.sh \
@@ -71,7 +89,9 @@ bash scripts/kconfig/merge_config.sh \
   "${FRAGMENT_FILE}"
 
 
+
 echo "=== 更新最终配置 ==="
+
 
 make \
   O=out \
@@ -86,9 +106,11 @@ make \
 
 echo "=== 当前 Stage1 配置确认 ==="
 
+
 grep -E \
-  "CONFIG_OPLUS_SM8250_CHARGER|CONFIG_OPLUS_FINGERPRINT|CONFIG_TOUCHPANEL_OPLUS" \
+  "CONFIG_QCOM_SMEM|CONFIG_OPLUS_SM8250_CHARGER|CONFIG_OPLUS_FINGERPRINT|CONFIG_TOUCHPANEL_OPLUS|CONFIG_OPLUS_SYSTEM_KERNEL|CONFIG_OPLUS_FEATURE_OPROJECT|CONFIG_OPLUS_FEATURE_PROJECTINFO" \
   out/.config || true
+
 
 
 
@@ -97,8 +119,9 @@ echo "=== 开始编译 Image ==="
 
 # Android 4.19 Oplus 驱动大量来自厂商源码,
 # 部分函数栈超过 clang 默认检查阈值。
-# 仅关闭该 warning 的 error 化,
+# 仅关闭 frame-larger-than 的 error 化,
 # 不关闭其它 Werror 检查。
+
 
 make \
   O=out \
@@ -113,7 +136,9 @@ make \
 
 
 
+
 echo "=== 编译完成 ==="
+
 
 echo "产物:"
 echo "kernel_source/out/arch/${ARCH}/boot/Image"
