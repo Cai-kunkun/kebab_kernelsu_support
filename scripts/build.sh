@@ -94,6 +94,18 @@ if [ -f drivers/input/oplus_fp_drivers/oplus_fp_common/oplus_fp_common.c ]; then
 fi
 
 
+# --------------------------------------------------
+# Fix OPLUS touchpanel unused functions
+# --------------------------------------------------
+
+echo "=== 修复 OPLUS 触摸屏未使用函数警告 ==="
+
+if [ -f drivers/input/touchscreen/oplus_touchscreen/touchpanel_common_driver.c ]; then
+    sed -i 's/^static int tp_suspend/__attribute__((unused)) static int tp_suspend/g' drivers/input/touchscreen/oplus_touchscreen/touchpanel_common_driver.c
+    sed -i 's/^static void tp_resume/__attribute__((unused)) static void tp_resume/g' drivers/input/touchscreen/oplus_touchscreen/touchpanel_common_driver.c
+fi
+
+
 
 # --------------------------------------------------
 # Merge fragment
