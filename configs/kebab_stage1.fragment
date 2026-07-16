@@ -49,7 +49,7 @@ CONFIG_OPLUS_FEATURE_PROJECTINFO=y
 
 
 #
-# OPLUS display notifier
+# Display: disable upstream msm to avoid duplicate symbols
 #
 
-CONFIG_DRM_MSM=y
+# CONFIG_DRM_MSM is not set

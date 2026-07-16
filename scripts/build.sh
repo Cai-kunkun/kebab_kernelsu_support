@@ -74,10 +74,20 @@ fi
 # Disable incompatible driver
 # --------------------------------------------------
 
-echo "=== 处理不兼容的驱动 ==="
+echo "=== 处理驱动冲突 ==="
 
-# 注释: schgm-flash 驱动依赖未满足时会导致链接错误
-# 不直接删除,而是检查其依赖的符号是否存在
+# 禁用 upstream DRM MSM 驱动以避免与 techpack/display 冲突
+if [ -f drivers/gpu/drm/msm/Makefile ]; then
+    # 备份原始 Makefile
+    cp drivers/gpu/drm/msm/Makefile drivers/gpu/drm/msm/Makefile.bak
+    # 清空 Makefile 内容，禁用所有编译
+    echo "# Disabled to avoid conflict with techpack/display" > drivers/gpu/drm/msm/Makefile
+fi
+
+# 禁用 fg-util.o 以避免与 qg-util.o 的 is_input_present 符号冲突
+if [ -f drivers/power/supply/qcom/Makefile ]; then
+    sed -i 's/^.*fg-util\.o.*$/# &/' drivers/power/supply/qcom/Makefile
+fi
 
 
 # --------------------------------------------------
