@@ -120,15 +120,45 @@ fi
 
 echo "=== 修复 MSM DRM notifier 符号导出 ==="
 
+# Find the correct msm_drv.c file in techpack/display
+MSM_DRV_FILE=""
 if [ -f techpack/display/msm/msm_drv.c ]; then
-    if ! grep -q "msm_drm_notifier_call_chain" techpack/display/msm/msm_drv.c; then
-        # 查找文件中是否存在 msm_drm_notifier_list
-        if grep -q "BLOCKING_NOTIFIER_HEAD(msm_drm_notifier_list)" techpack/display/msm/msm_drv.c; then
-            # 如果存在 notifier_list，在其后添加 call_chain 函数
-            sed -i '/BLOCKING_NOTIFIER_HEAD(msm_drm_notifier_list);/a \\nint msm_drm_notifier_call_chain(unsigned long val, void *v)\n{\n\treturn blocking_notifier_call_chain(\&msm_drm_notifier_list, val, v);\n}\nEXPORT_SYMBOL(msm_drm_notifier_call_chain);' techpack/display/msm/msm_drv.c
+    MSM_DRV_FILE="techpack/display/msm/msm_drv.c"
+elif [ -f techpack/display/msm/sde_drv.c ]; then
+    MSM_DRV_FILE="techpack/display/msm/sde_drv.c"
+fi
+
+if [ -n "$MSM_DRV_FILE" ] && [ -f "$MSM_DRV_FILE" ]; then
+    if ! grep -q "msm_drm_notifier_call_chain" "$MSM_DRV_FILE"; then
+        # Check if notifier list already exists
+        if grep -q "BLOCKING_NOTIFIER_HEAD(msm_drm_notifier_list)" "$MSM_DRV_FILE"; then
+            # Use awk to insert the function right after the notifier list declaration
+            awk '
+            /BLOCKING_NOTIFIER_HEAD\(msm_drm_notifier_list\)/ {
+                print
+                print ""
+                print "int msm_drm_notifier_call_chain(unsigned long val, void *v)"
+                print "{"
+                print "\treturn blocking_notifier_call_chain(&msm_drm_notifier_list, val, v);"
+                print "}"
+                print "EXPORT_SYMBOL(msm_drm_notifier_call_chain);"
+                next
+            }
+            {print}
+            ' "$MSM_DRV_FILE" > "${MSM_DRV_FILE}.new"
+            mv "${MSM_DRV_FILE}.new" "$MSM_DRV_FILE"
         else
-            # 如果不存在，在所有 include 之后添加
-            sed -i '/#include/a \\nstatic BLOCKING_NOTIFIER_HEAD(msm_drm_notifier_list);\n\nint msm_drm_notifier_call_chain(unsigned long val, void *v)\n{\n\treturn blocking_notifier_call_chain(\&msm_drm_notifier_list, val, v);\n}\nEXPORT_SYMBOL(msm_drm_notifier_call_chain);' techpack/display/msm/msm_drv.c | head -1
+            # If notifier list doesn't exist, add both at the end
+            cat >> "$MSM_DRV_FILE" << 'EOFNOTIFIER'
+
+static BLOCKING_NOTIFIER_HEAD(msm_drm_notifier_list);
+
+int msm_drm_notifier_call_chain(unsigned long val, void *v)
+{
+	return blocking_notifier_call_chain(&msm_drm_notifier_list, val, v);
+}
+EXPORT_SYMBOL(msm_drm_notifier_call_chain);
+EOFNOTIFIER
         fi
     fi
 fi
