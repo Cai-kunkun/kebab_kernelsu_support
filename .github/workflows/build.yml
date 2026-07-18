@@ -1,0 +1,88 @@
+name: Build LineageOS for OnePlus 8T (kebab)
+
+on:
+  workflow_dispatch: # 支持手动触发编译
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04 # 官方推荐的系统版本
+    
+    steps:
+    # 1. 清理服务器磁盘空间（GitHub 默认服务器空间极小，如果是自托管服务器可删除此步骤）
+    - name: Free Disk Space
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        docker-images: true
+        swap-storage: true
+
+    # 2. 安装官方要求的依赖包
+    - name: Install Build Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git git-lfs gnupg gperf imagemagick protobuf-compiler python3-protobuf lib32readline-dev lib32z1-dev libdw-dev libelf-dev libgnutls28-dev lz4 libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc xxd zip zlib1g-dev python-is-python3
+
+    # 3. 配置 Git 环境
+    - name: Configure Git
+      run: |
+        git config --global user.email "actions@github.com"
+        git config --global user.name "GitHub Actions"
+        git lfs install
+        git config --global trailer.changeid.key "Change-Id"
+
+    # 4. 安装 Google Repo 工具
+    - name: Install Repo Command
+      run: |
+        mkdir -p ~/bin
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+        chmod a+x ~/bin/repo
+        echo "$HOME/bin" >> $GITHUB_PATH
+
+    # 5. 初始化并同步 LineageOS 源码
+    - name: Initialize and Sync LineageOS Source
+      run: |
+        mkdir -p ~/android/lineage
+        cd ~/android/lineage
+        repo init -u https://github.com/LineageOS/android.git -b lineage-23.2 --git-lfs --no-clone-bundle
+        # 使用 4 个线程同步，若失败可降低为 -j2 
+        repo sync -j4 -c --fail-fast --force-sync
+
+    # 6. 配置 ccache 编译缓存以加速后续编译
+    - name: Setup CCache
+      run: |
+        echo "USE_CCACHE=1" >> $GITHUB_ENV
+        echo "CCACHE_EXEC=/usr/bin/ccache" >> $GITHUB_ENV
+        ccache -M 50G
+        ccache -o compression=true
+
+    # 7. 下载一加 8T (kebab) 的设备源码并导入厂商 Blobs
+    # 注意：因为 GitHub 环境无法连接真机，这里通过拉取社区预先提取好的 TheMuppets 仓库来代替 ./extract-files.py 步骤
+    - name: Prepare Device Source and Proprietary Blobs
+      run: |
+        cd ~/android/lineage
+        source build/envsetup.sh
+        breakfast kebab
+        
+        # 克隆第三方整理好的闭源驱动仓库（TheMuppets）到指定目录，代替真机提取
+        git clone https://github.com/TheMuppets/proprietary_vendor_oneplus.git -b lineage-23.2 vendor/oneplus
+
+    # 8. 开始执行 Brunch 编译
+    - name: Start Brunch Build
+      run: |
+        cd ~/android/lineage
+        source build/envsetup.sh
+        # 执行编译命令
+        brunch kebab
+
+    # 9. 将编译生成的 ROM 固件和 Recovery 上传到 GitHub Actions 产物中
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: LineageOS-kebab-Build
+        path: |
+          ~/android/lineage/out/target/product/kebab/lineage-*.zip
+          ~/android/lineage/out/target/product/kebab/recovery.img
