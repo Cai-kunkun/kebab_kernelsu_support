@@ -223,10 +223,20 @@ jobs:
           CONFIG="./scripts/config --file ${OUT_DIR}/.config"
           if [ "${APPLY_KERNELSU}" = "true" ]; then
             $CONFIG -e KSU
-            # 正确的配置选项是 KSU_MANUAL_HOOK (单数，不是复数 HOOKS)
-            # 但即使启用它，KernelSU 还会检查 kernel/reboot.c 中是否有 ksu_handle_sys_reboot
-            # coccinelle 脚本可能没添加这个 hook，所以这里直接用 KPROBES_HOOK
-            # (kprobes 模式不需要手动修改内核源码，自动通过检查)
+
+            # KSU_KPROBES_HOOK 需要以下依赖项:
+            # 1. KPROBES (已在 vendor/oplus.config 中启用)
+            # 2. KRETPROBES (需要显式启用)
+            # 3. HAVE_SYSCALL_TRACEPOINTS (架构特性,arm64 支持)
+            # 4. KSU_MANUAL_HOOK 必须禁用
+
+            # 启用 KRETPROBES (KPROBES 的扩展)
+            $CONFIG -e KRETPROBES
+
+            # 明确禁用 KSU_MANUAL_HOOK,确保可以使用 KPROBES_HOOK
+            $CONFIG -d KSU_MANUAL_HOOK
+
+            # 启用 KSU_KPROBES_HOOK
             $CONFIG -e KSU_KPROBES_HOOK
           fi
           if [ "${APPLY_SUSFS}" = "true" ]; then
