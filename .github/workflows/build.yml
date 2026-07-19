@@ -50,9 +50,9 @@ on:
         required: false
         default: "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh"
       ksu_setup_arg:
-        description: "传给 setup.sh 的分支参数(4.19 这种老内核官方文档建议用 legacy;也可填 stable/dev/具体 tag)"
+        description: "传给 setup.sh 的分支参数(next/stable/dev/legacy/具体 tag)"
         required: false
-        default: "legacy"
+        default: "next"
       ksu_dir_name:
         description: "setup.sh 把 KernelSU-Next 拉到内核根目录下的文件夹名(KernelSU-Next 默认就叫这个,别的 fork 可能叫 KernelSU)"
         required: false
@@ -87,7 +87,7 @@ env:
   DEFCONFIG: ${{ github.event.inputs.defconfig || 'vendor/kona-perf_defconfig vendor/oplus.config' }}
   APPLY_KERNELSU: ${{ github.event.inputs.apply_kernelsu || 'false' }}
   KSU_SETUP_URL: ${{ github.event.inputs.ksu_setup_url || 'https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh' }}
-  KSU_SETUP_ARG: ${{ github.event.inputs.ksu_setup_arg || 'legacy' }}
+  KSU_SETUP_ARG: ${{ github.event.inputs.ksu_setup_arg || 'next' }}
   KSU_DIR_NAME: ${{ github.event.inputs.ksu_dir_name || 'KernelSU-Next' }}
   APPLY_SUSFS: ${{ github.event.inputs.apply_susfs || 'false' }}
   SUSFS_BRANCH: ${{ github.event.inputs.susfs_branch || 'kernel-4.19' }}
