@@ -69,6 +69,10 @@ on:
         description: "susfs4ksu/kernel_patches 下对应内核版本的补丁文件名"
         required: false
         default: "50_add_susfs_in_kernel-4.19.patch"
+      kernel_local_version:
+        description: "自定义内核版本后缀,带前导 -,比如填 -MyKernel 会让 uname -r 显示成 4.19.325-MyKernel(会清空原本 cip132-st16-perf 那一长串);留空则保留仓库原本的版本字符串"
+        required: false
+        default: ""
 
 env:
   ARCH: arm64
@@ -88,6 +92,7 @@ env:
   APPLY_SUSFS: ${{ github.event.inputs.apply_susfs || 'false' }}
   SUSFS_BRANCH: ${{ github.event.inputs.susfs_branch || 'kernel-4.19' }}
   SUSFS_KERNEL_PATCH: ${{ github.event.inputs.susfs_kernel_patch || '50_add_susfs_in_kernel-4.19.patch' }}
+  KERNEL_LOCAL_VERSION: ${{ github.event.inputs.kernel_local_version || '' }}
 
 jobs:
   build:
@@ -113,6 +118,18 @@ jobs:
         # 所以这里直接用 git clone,兼容任意 URL。
         run: |
           git clone --depth=1 -b "${KERNEL_BRANCH}" "${KERNEL_REPO}" kernel
+
+      # uname -r 显示的完整版本号 = Makefile 里的 VERSION.PATCHLEVEL.SUBLEVEL(即 4.19.325,
+      # 这三个数字来自源码本身,不建议改) + Makefile 里的 EXTRAVERSION 字段(默认帮你带出了
+      # "-cip132-st16" 这种一大串) + 下面 config 里 CONFIG_LOCALVERSION 追加的部分。
+      # 这里先把 EXTRAVERSION 清空,后面在生成完 defconfig 后把 CONFIG_LOCALVERSION
+      # 设成你自定义的值,两步加起来就等于完全替换掉 4.19.325 后面那一整段。
+      - name: 自定义内核版本号(可选)
+        if: ${{ env.KERNEL_LOCAL_VERSION != '' }}
+        working-directory: kernel
+        run: |
+          sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION =/' Makefile
+          grep '^EXTRAVERSION' Makefile
 
       - name: 拉取 clang 工具链
         run: |
@@ -181,8 +198,11 @@ jobs:
 
       # defconfig 本身大概率不会带 CONFIG_KSU / CONFIG_KSU_SUSFS,需要在编译前手动打开。
       # KSU_SUSFS_* 各个子功能开关按需增删,这里只启用了最常用的一批。
-      - name: 启用 KernelSU-Next/SUSFS 相关配置(可选)
-        if: ${{ env.APPLY_KERNELSU == 'true' || env.APPLY_SUSFS == 'true' }}
+      # CONFIG_LOCALVERSION_AUTO 默认是开的,开着的话内核还会自动在版本号后面拼一段
+      # git commit 相关的后缀,所以自定义版本号时要把它关掉,否则你的自定义名称后面
+      # 还会跟一串奇怪的 hash。
+      - name: 应用自定义配置(KernelSU-Next / SUSFS / 版本号)
+        if: ${{ env.APPLY_KERNELSU == 'true' || env.APPLY_SUSFS == 'true' || env.KERNEL_LOCAL_VERSION != '' }}
         working-directory: kernel
         run: |
           CONFIG="./scripts/config --file ${OUT_DIR}/.config"
@@ -195,6 +215,10 @@ jobs:
             $CONFIG -e KSU_SUSFS_SUS_MOUNT
             $CONFIG -e KSU_SUSFS_SUS_KSTAT
             $CONFIG -e KSU_SUSFS_TRY_UMOUNT
+          fi
+          if [ -n "${KERNEL_LOCAL_VERSION}" ]; then
+            $CONFIG -d LOCALVERSION_AUTO
+            $CONFIG --set-str LOCALVERSION "${KERNEL_LOCAL_VERSION}"
           fi
           make O=${OUT_DIR} ARCH=${ARCH} CC=clang olddefconfig
 
