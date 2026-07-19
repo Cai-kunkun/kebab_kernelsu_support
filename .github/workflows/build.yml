@@ -1,88 +1,226 @@
-name: Build LineageOS for OnePlus 8T (kebab)
+# .github/workflows/build-kernel.yml
+#
+# 只编译内核(不构建完整 LineageOS 系统)
+# 适用于:OnePlus 8T (kebab, SM8250),LineageOS 23.2 内核源码 (android_kernel_oneplus_sm8250)
+#
+# ⚠️ 重要提示(已核实):有人在 XDA 论坛记录过用完全相同的仓库/分支
+# (LineageOS/android_kernel_oneplus_sm8250 @ lineage-23.2)集成 KernelSU-Next + SUSFS 的过程,
+# 提到应用 susfs4ksu 补丁时遇到了大量 rejected hunks,需要手动解决冲突。
+# 也就是说:下面 apply_susfs 这一步很可能不会一次就干净地 apply 成功,CI 里自动
+# patch 失败是预期情况,不代表你的配置有问题。
+#
+# 建议的实际工作方式:
+#   1) 先在本地(或者跑一次这个 workflow 让它失败)得到冲突信息,手动解决 rejected hunks;
+#   2) 把解决完冲突、已经集成好 KernelSU+SUSFS 的内核提交到你自己的 fork 分支;
+#   3) 之后 kernel_repo/kernel_branch 直接指向你这个已经集成好的 fork,
+#      apply_kernelsu / apply_susfs 都设为 false —— 这样每次 CI 运行只是纯编译,稳定且快。
+# 下面保留自动下载补丁的步骤是为了方便你第一次跑 CI 时定位冲突,而不是保证每次都能无人值守跑通。
+#
+# 触发方式:
+#   - push 到 main 分支时自动跑一次(用的是下面各个 xxx_default 值)。
+#   - 也可以去 Actions 页面手动点 "Run workflow",这时候可以在页面上改任意参数
+#     (kernel_repo / kernel_branch / defconfig / 是否打 KernelSU-Next+SUSFS 等)。
+#   如果你的内核仓库不叫 main 分支,或者想用别的分支触发,改下面 push.branches 即可。
+
+name: Build kebab kernel
 
 on:
-  workflow_dispatch: # 支持手动触发编译
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      kernel_repo:
+        description: "内核源码仓库地址"
+        required: true
+        default: "https://github.com/LineageOS/android_kernel_oneplus_sm8250"
+      kernel_branch:
+        description: "内核源码分支"
+        required: true
+        default: "lineage-23.2"
+      defconfig:
+        description: "defconfig 名称,空格分隔可传多个一起合并(比如加上 vendor/oplus.config)"
+        required: true
+        default: "vendor/kona-perf_defconfig vendor/oplus.config"
+      apply_kernelsu:
+        description: "是否应用 KernelSU-Next 集成脚本"
+        type: boolean
+        default: false
+      ksu_setup_url:
+        description: "KernelSU-Next setup.sh 地址"
+        required: false
+        default: "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh"
+      ksu_setup_arg:
+        description: "传给 setup.sh 的分支参数(4.19 这种老内核官方文档建议用 legacy;也可填 stable/dev/具体 tag)"
+        required: false
+        default: "legacy"
+      ksu_dir_name:
+        description: "setup.sh 把 KernelSU-Next 拉到内核根目录下的文件夹名(KernelSU-Next 默认就叫这个,别的 fork 可能叫 KernelSU)"
+        required: false
+        default: "KernelSU-Next"
+      apply_susfs:
+        description: "是否自动下载并应用 SUSFS 补丁"
+        type: boolean
+        default: false
+      susfs_branch:
+        description: "susfs4ksu 仓库分支(kernel-4.19 已确认存在)"
+        required: false
+        default: "kernel-4.19"
+      susfs_kernel_patch:
+        description: "susfs4ksu/kernel_patches 下对应内核版本的补丁文件名"
+        required: false
+        default: "50_add_susfs_in_kernel-4.19.patch"
+
+env:
+  ARCH: arm64
+  OUT_DIR: out
+  CLANG_REPO: https://github.com/kdrag0n/proton-clang.git
+  CLANG_BRANCH: master
+  CLANG_DIR: clang
+  # push 触发时没有 github.event.inputs,所以每个可配置项都用 || 兜底到默认值,
+  # 这样 push 和手动 workflow_dispatch 触发用的是同一套逻辑。
+  KERNEL_REPO: ${{ github.event.inputs.kernel_repo || 'https://github.com/LineageOS/android_kernel_oneplus_sm8250' }}
+  KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch || 'lineage-23.2' }}
+  DEFCONFIG: ${{ github.event.inputs.defconfig || 'vendor/kona-perf_defconfig vendor/oplus.config' }}
+  APPLY_KERNELSU: ${{ github.event.inputs.apply_kernelsu || 'false' }}
+  KSU_SETUP_URL: ${{ github.event.inputs.ksu_setup_url || 'https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh' }}
+  KSU_SETUP_ARG: ${{ github.event.inputs.ksu_setup_arg || 'legacy' }}
+  KSU_DIR_NAME: ${{ github.event.inputs.ksu_dir_name || 'KernelSU-Next' }}
+  APPLY_SUSFS: ${{ github.event.inputs.apply_susfs || 'false' }}
+  SUSFS_BRANCH: ${{ github.event.inputs.susfs_branch || 'kernel-4.19' }}
+  SUSFS_KERNEL_PATCH: ${{ github.event.inputs.susfs_kernel_patch || '50_add_susfs_in_kernel-4.19.patch' }}
 
 jobs:
   build:
-    runs-on: ubuntu-24.04 # 官方推荐的系统版本
-    
+    runs-on: ubuntu-22.04
     steps:
-    # 1. 清理服务器磁盘空间（GitHub 默认服务器空间极小，如果是自托管服务器可删除此步骤）
-    - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@main
-      with:
-        tool-cache: true
-        android: true
-        dotnet: true
-        haskell: true
-        large-packages: true
-        docker-images: true
-        swap-storage: true
+      - name: 释放磁盘空间
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
 
-    # 2. 安装官方要求的依赖包
-    - name: Install Build Dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git git-lfs gnupg gperf imagemagick protobuf-compiler python3-protobuf lib32readline-dev lib32z1-dev libdw-dev libelf-dev libgnutls28-dev lz4 libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc xxd zip zlib1g-dev python-is-python3
+      - name: 安装编译依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
+            git gnupg gperf lib32ncurses5-dev lib32readline-dev lib32z1-dev \
+            libelf-dev libssl-dev liblz4-tool libncurses5-dev libsdl1.2-dev \
+            libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools \
+            xsltproc zip zlib1g-dev python3 python-is-python3
 
-    # 3. 配置 Git 环境
-    - name: Configure Git
-      run: |
-        git config --global user.email "actions@github.com"
-        git config --global user.name "GitHub Actions"
-        git lfs install
-        git config --global trailer.changeid.key "Change-Id"
+      - name: 检出内核源码
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.KERNEL_REPO }}
+          ref: ${{ env.KERNEL_BRANCH }}
+          path: kernel
+          fetch-depth: 1
 
-    # 4. 安装 Google Repo 工具
-    - name: Install Repo Command
-      run: |
-        mkdir -p ~/bin
-        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-        chmod a+x ~/bin/repo
-        echo "$HOME/bin" >> $GITHUB_PATH
+      - name: 拉取 clang 工具链
+        run: |
+          git clone --depth=1 -b "${CLANG_BRANCH}" "${CLANG_REPO}" "${CLANG_DIR}"
+          echo "$(pwd)/${CLANG_DIR}/bin" >> "$GITHUB_PATH"
 
-    # 5. 初始化并同步 LineageOS 源码
-    - name: Initialize and Sync LineageOS Source
-      run: |
-        mkdir -p ~/android/lineage
-        cd ~/android/lineage
-        repo init -u https://github.com/LineageOS/android.git -b lineage-23.2 --git-lfs --no-clone-bundle
-        # 使用 4 个线程同步，若失败可降低为 -j2 
-        repo sync -j4 -c --fail-fast --force-sync
+      - name: 启用 ccache
+        run: |
+          sudo apt-get install -y ccache
+          ccache -M 5G
+          echo "USE_CCACHE=1" >> "$GITHUB_ENV"
+          echo "CCACHE_EXEC=$(command -v ccache)" >> "$GITHUB_ENV"
 
-    # 6. 配置 ccache 编译缓存以加速后续编译
-    - name: Setup CCache
-      run: |
-        echo "USE_CCACHE=1" >> $GITHUB_ENV
-        echo "CCACHE_EXEC=/usr/bin/ccache" >> $GITHUB_ENV
-        ccache -M 50G
-        ccache -o compression=true
+      - name: 应用 KernelSU-Next(可选)
+        if: ${{ env.APPLY_KERNELSU == 'true' }}
+        working-directory: kernel
+        run: |
+          curl -LSs "${KSU_SETUP_URL}" | bash -s "${KSU_SETUP_ARG}"
 
-    # 7. 下载一加 8T (kebab) 的设备源码并导入厂商 Blobs
-    # 注意：因为 GitHub 环境无法连接真机，这里通过拉取社区预先提取好的 TheMuppets 仓库来代替 ./extract-files.py 步骤
-    - name: Prepare Device Source and Proprietary Blobs
-      run: |
-        cd ~/android/lineage
-        source build/envsetup.sh
-        breakfast kebab
-        
-        # 克隆第三方整理好的闭源驱动仓库（TheMuppets）到指定目录，代替真机提取
-        git clone https://github.com/TheMuppets/proprietary_vendor_oneplus.git -b lineage-23.2 vendor/oneplus
+      # SUSFS 自动下载并集成。kernel-4.19 分支在 susfs4ksu 官方仓库确实存在,
+      # 但请注意:官方文档里也明确说明非 GKI 内核打这个补丁经常会有 rejected hunks,
+      # 需要手动核对/修复冲突(尤其是 struct 里缺 android_kabi_reservedX 占位字段的情况)。
+      # 也就是说这一步不保证一次成功,CI 报错时请去 Actions 日志里看具体是哪个 .rej 文件、
+      # 手动修好后再提交回内核仓库,而不是无限重跑这个 workflow。
+      #
+      # 另外:KernelSU-Next 较新版本可能已经内置了 susfs 的 hook 支持(不需要额外打
+      # 10_enable_susfs_for_ksu.patch),所以这一步补丁应用失败时先去 KernelSU-Next 里
+      # 搜一下有没有 CONFIG_KSU_SUSFS 相关代码,再判断是不是真的需要这个补丁。
+      - name: 拉取并应用 SUSFS(可选)
+        if: ${{ env.APPLY_SUSFS == 'true' }}
+        run: |
+          git clone --depth=1 -b "${SUSFS_BRANCH}" \
+            https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
 
-    # 8. 开始执行 Brunch 编译
-    - name: Start Brunch Build
-      run: |
-        cd ~/android/lineage
-        source build/envsetup.sh
-        # 执行编译命令
-        brunch kebab
+          # 1. 拷贝 susfs 的内核态源码文件
+          cp susfs4ksu/kernel_patches/fs/* kernel/fs/ 2>/dev/null || true
+          cp susfs4ksu/kernel_patches/include/linux/* kernel/include/linux/ 2>/dev/null || true
 
-    # 9. 将编译生成的 ROM 固件和 Recovery 上传到 GitHub Actions 产物中
-    - name: Upload Build Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: LineageOS-kebab-Build
-        path: |
-          ~/android/lineage/out/target/product/kebab/lineage-*.zip
-          ~/android/lineage/out/target/product/kebab/recovery.img
+          # 2. 给内核本体打 susfs 补丁
+          cp "susfs4ksu/kernel_patches/${SUSFS_KERNEL_PATCH}" kernel/
+          cd kernel
+          patch -p1 < "${SUSFS_KERNEL_PATCH}"
+          cd ..
+
+          # 3. 给 KernelSU-Next 打启用 susfs 的补丁(需要先执行过上面的 KernelSU 步骤)
+          KSU_DIR="kernel/${KSU_DIR_NAME}"
+          if [ -d "$KSU_DIR" ]; then
+            cp susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch "$KSU_DIR/" 2>/dev/null || true
+            if [ -f "$KSU_DIR/10_enable_susfs_for_ksu.patch" ]; then
+              cd "$KSU_DIR"
+              patch -p1 < 10_enable_susfs_for_ksu.patch || \
+                echo "打补丁失败:KernelSU-Next 可能已经内置 susfs 支持,或者补丁需要手动解决冲突,请查看上面日志。"
+              cd - > /dev/null
+            fi
+          else
+            echo "未发现 $KSU_DIR 目录:请确认已开启 apply_kernelsu,且 ksu_dir_name 和 setup.sh 实际拉取的目录名一致。"
+          fi
+
+      - name: 生成 defconfig
+        working-directory: kernel
+        # 不加引号是有意的:DEFCONFIG 里空格分隔的多个 config(比如
+        # "vendor/kona-perf_defconfig vendor/oplus.config")需要被当成多个独立参数传给 make,
+        # 才会按 kbuild 的 fragment 合并方式依次叠加,而不是被当成一个不存在的文件名。
+        run: |
+          make O=${OUT_DIR} ARCH=${ARCH} CC=clang ${DEFCONFIG}
+
+      # defconfig 本身大概率不会带 CONFIG_KSU / CONFIG_KSU_SUSFS,需要在编译前手动打开。
+      # KSU_SUSFS_* 各个子功能开关按需增删,这里只启用了最常用的一批。
+      - name: 启用 KernelSU-Next/SUSFS 相关配置(可选)
+        if: ${{ env.APPLY_KERNELSU == 'true' || env.APPLY_SUSFS == 'true' }}
+        working-directory: kernel
+        run: |
+          CONFIG="./scripts/config --file ${OUT_DIR}/.config"
+          if [ "${APPLY_KERNELSU}" = "true" ]; then
+            $CONFIG -e KSU
+          fi
+          if [ "${APPLY_SUSFS}" = "true" ]; then
+            $CONFIG -e KSU_SUSFS
+            $CONFIG -e KSU_SUSFS_SUS_PATH
+            $CONFIG -e KSU_SUSFS_SUS_MOUNT
+            $CONFIG -e KSU_SUSFS_SUS_KSTAT
+            $CONFIG -e KSU_SUSFS_TRY_UMOUNT
+          fi
+          make O=${OUT_DIR} ARCH=${ARCH} CC=clang olddefconfig
+
+      - name: 编译内核
+        working-directory: kernel
+        run: |
+          # proton-clang 自带的交叉编译前缀是 aarch64-linux-gnu- / arm-linux-androideabi-
+          make -j"$(nproc --all)" O=${OUT_DIR} ARCH=${ARCH} \
+            CC="ccache clang" \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            LLVM=1 LLVM_IAS=1
+
+      - name: 收集产物
+        run: |
+          mkdir -p artifacts
+          cp kernel/${OUT_DIR}/arch/arm64/boot/Image artifacts/ 2>/dev/null || true
+          cp kernel/${OUT_DIR}/arch/arm64/boot/Image.gz-dtb artifacts/ 2>/dev/null || true
+          cp kernel/${OUT_DIR}/arch/arm64/boot/dtbo.img artifacts/ 2>/dev/null || true
+          ls -la artifacts
+
+      - name: 上传编译产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: kebab-kernel-${{ github.run_number }}
+          path: artifacts/*
+          if-no-files-found: error
