@@ -27,14 +27,14 @@ on:
         type: boolean
         default: true
       ksu_source:
-        description: "KernelSU-Next 源码来源:official_stable(官方最新 stable tag,推荐先试)/ official_dev(官方 dev 分支,较新可能对老内核不兼容)/ community_419(社区 4.19 专用整合 fork)"
+        description: "KernelSU-Next 源码来源:community_419(社区 4.19 专用 fork,推荐)/ official_stable / official_dev(这两个官方源在 kebab 4.19 上已实测因 infra/file_wrapper.c 编译失败)"
         required: true
         type: choice
         options:
+          - community_419
           - official_stable
           - official_dev
-          - community_419
-        default: official_stable
+        default: community_419
       ksu_community_repo:
         description: "ksu_source=community_419 时使用的仓库地址"
         required: false
@@ -44,7 +44,7 @@ on:
         required: false
         default: "legacy"
       hook_mode:
-        description: "Hook 方式:kprobe(推荐先试,4.19 内核大概率能用)/ manual(确认 kprobe 在本机坏了才用)"
+        description: "Hook 方式:kprobe(推荐先试)/ manual"
         required: true
         type: choice
         options:
@@ -52,7 +52,7 @@ on:
           - manual
         default: kprobe
       kprobe_test_mode:
-        description: "诊断用:hook_mode=kprobe 时,注释掉 hook 初始化后编一份'裸内核'。刷入后设备能正常开机说明 kprobe 坏了应改用 manual;开机异常说明 kprobe 正常。仅用于测试,不要日常使用这个开关编出来的产物。"
+        description: "诊断用:注释掉 kprobe hook 初始化后编一份'裸内核'测试用,不要日常使用"
         required: true
         type: boolean
         default: false
@@ -68,7 +68,7 @@ env:
   DEFCONFIG: ${{ github.event.inputs.defconfig || 'vendor/kona-perf_defconfig vendor/oplus.config' }}
   KERNEL_LOCAL_VERSION: ${{ github.event.inputs.kernel_local_version || '' }}
   ENABLE_KSU_NEXT: ${{ github.event.inputs.enable_ksu_next || 'true' }}
-  KSU_SOURCE: ${{ github.event.inputs.ksu_source || 'official_stable' }}
+  KSU_SOURCE: ${{ github.event.inputs.ksu_source || 'community_419' }}
   KSU_COMMUNITY_REPO: ${{ github.event.inputs.ksu_community_repo || 'https://github.com/wshamroukh/KernelSU-Next-SUSFS-kernelv4.19' }}
   KSU_COMMUNITY_BRANCH: ${{ github.event.inputs.ksu_community_branch || 'legacy' }}
   HOOK_MODE: ${{ github.event.inputs.hook_mode || 'kprobe' }}
@@ -133,19 +133,28 @@ jobs:
           case "${KSU_SOURCE}" in
             community_419)
               echo "使用社区 4.19 专用整合 fork: ${KSU_COMMUNITY_REPO}@${KSU_COMMUNITY_BRANCH}"
-              git clone --depth=1 -b "${KSU_COMMUNITY_BRANCH}" "${KSU_COMMUNITY_REPO}" drivers/kernelsu
+              git clone --depth=1 -b "${KSU_COMMUNITY_BRANCH}" "${KSU_COMMUNITY_REPO}" KernelSU-Next-Community
+
+              if [ ! -d "KernelSU-Next-Community/kernel" ]; then
+                echo "::error::${KSU_COMMUNITY_REPO}@${KSU_COMMUNITY_BRANCH} 里没有 kernel/ 子目录,这个 fork 的目录结构和官方 KernelSU-Next 不一样,需要人工确认实际驱动源码路径后再改脚本"
+                ls -la KernelSU-Next-Community
+                exit 1
+              fi
+
+              # 跟官方 setup.sh 一样,软链接仓库里的 kernel/ 子目录当作 drivers/kernelsu
+              ln -sf "$(realpath --relative-to=drivers "$(pwd)/KernelSU-Next-Community/kernel")" drivers/kernelsu
 
               grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig || \
                 sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-              grep -q 'kernelsu/' drivers/Makefile || \
-                echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+              grep -q 'kernelsu' drivers/Makefile || \
+                printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> drivers/Makefile
               ;;
             official_dev)
-              echo "官方 dev 分支(较新,如遇编译报错请改用 official_stable 或 community_419)"
+              echo "官方 dev 分支(已知在本内核上因 infra/file_wrapper.c 编译失败)"
               curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s dev
               ;;
             *)
-              echo "官方最新 stable tag"
+              echo "官方最新 stable tag(已知在本内核上因 infra/file_wrapper.c 编译失败)"
               curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s stable
               ;;
           esac
@@ -157,14 +166,14 @@ jobs:
         run: |
           FILE=$(grep -rl "ksu_sucompat_init" --include=*.c . | head -n1)
           if [ -z "$FILE" ]; then
-            echo "::error::没找到 ksu_sucompat_init 调用点,KernelSU-Next 版本可能变了实现方式,需要手动确认后再测试"
+            echo "::error::没找到 ksu_sucompat_init 调用点,需要手动确认后再测试"
             exit 1
           fi
           echo "将在 $FILE 里注释掉 ksu_sucompat_init() / ksu_ksud_init() 调用"
           sed -i -E 's/^([[:space:]]*)(ksu_sucompat_init\(\);)/\1\/\/\2/' "$FILE"
           sed -i -E 's/^([[:space:]]*)(ksu_ksud_init\(\);)/\1\/\/\2/' "$FILE"
           grep -n "ksu_sucompat_init\|ksu_ksud_init" "$FILE"
-          echo "::notice::这次产物用于测试:刷入后能正常开机说明 kprobe 在本机是坏的,应改用 hook_mode=manual;开机异常说明 kprobe 正常,后续正常构建把这个开关关掉即可"
+          echo "::notice::这次产物用于测试:刷入后能正常开机说明 kprobe 在本机是坏的,应改用 hook_mode=manual;开机异常说明 kprobe 正常"
 
       - name: 拉取 clang 工具链
         if: steps.cache-clang.outputs.cache-hit != 'true'
