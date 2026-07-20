@@ -1,26 +1,3 @@
-# .github/workflows/build-kernel.yml
-#
-# 只编译内核(不构建完整 LineageOS 系统)
-# 适用于:OnePlus 8T (kebab, SM8250),LineageOS 23.2 内核源码 (android_kernel_oneplus_sm8250)
-#
-# ⚠️ 重要提示(已核实):有人在 XDA 论坛记录过用完全相同的仓库/分支
-# (LineageOS/android_kernel_oneplus_sm8250 @ lineage-23.2)集成 KernelSU-Next + SUSFS 的过程,
-# 提到应用 susfs4ksu 补丁时遇到了大量 rejected hunks,需要手动解决冲突。
-# 也就是说:下面 apply_susfs 这一步很可能不会一次就干净地 apply 成功,CI 里自动
-# patch 失败是预期情况,不代表你的配置有问题。
-#
-# 建议的实际工作方式:
-#   1) 先在本地(或者跑一次这个 workflow 让它失败)得到冲突信息,手动解决 rejected hunks;
-#   2) 把解决完冲突、已经集成好 KernelSU+SUSFS 的内核提交到你自己的 fork 分支;
-#   3) 之后 kernel_repo/kernel_branch 直接指向你这个已经集成好的 fork,
-#      apply_kernelsu / apply_susfs 都设为 false —— 这样每次 CI 运行只是纯编译,稳定且快。
-# 下面保留自动下载补丁的步骤是为了方便你第一次跑 CI 时定位冲突,而不是保证每次都能无人值守跑通。
-#
-# 触发方式:
-#   - push 到 main 分支时自动跑一次(用的是下面各个 xxx_default 值)。
-#   - 也可以去 Actions 页面手动点 "Run workflow",这时候可以在页面上改任意参数
-#     (kernel_repo / kernel_branch / defconfig / 是否打 KernelSU-Next+SUSFS 等)。
-#   如果你的内核仓库不叫 main 分支,或者想用别的分支触发,改下面 push.branches 即可。
 
 name: Build kebab kernel
 
@@ -41,34 +18,6 @@ on:
         description: "defconfig 名称,空格分隔可传多个一起合并(比如加上 vendor/oplus.config)"
         required: true
         default: "vendor/kona-perf_defconfig vendor/oplus.config"
-      apply_kernelsu:
-        description: "是否应用 KernelSU-Next 集成脚本"
-        type: boolean
-        default: true
-      ksu_setup_url:
-        description: "KernelSU-Next setup.sh 地址"
-        required: false
-        default: "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/stable/kernel/setup.sh"
-      ksu_setup_arg:
-        description: "传给 setup.sh 的分支参数(next/stable/dev/legacy/具体 tag)"
-        required: false
-        default: "stable"
-      ksu_dir_name:
-        description: "setup.sh 把 KernelSU-Next 拉到内核根目录下的文件夹名(KernelSU-Next 默认就叫这个,别的 fork 可能叫 KernelSU)"
-        required: false
-        default: "KernelSU-Next"
-      apply_susfs:
-        description: "是否自动下载并应用 SUSFS 补丁"
-        type: boolean
-        default: false
-      susfs_branch:
-        description: "susfs4ksu 仓库分支(kernel-4.19 已确认存在)"
-        required: false
-        default: "kernel-4.19"
-      susfs_kernel_patch:
-        description: "susfs4ksu/kernel_patches 下对应内核版本的补丁文件名"
-        required: false
-        default: "50_add_susfs_in_kernel-4.19.patch"
       kernel_local_version:
         description: "自定义内核版本后缀,带前导 -,比如填 -MyKernel 会让 uname -r 显示成 4.19.325-MyKernel(会清空原本 cip132-st16-perf 那一长串);留空则保留仓库原本的版本字符串"
         required: false
@@ -80,28 +29,15 @@ env:
   CLANG_REPO: https://github.com/kdrag0n/proton-clang.git
   CLANG_BRANCH: master
   CLANG_DIR: clang
-  # push 触发时没有 github.event.inputs,所以每个可配置项都用 || 兜底到默认值,
-  # 这样 push 和手动 workflow_dispatch 触发用的是同一套逻辑。
   KERNEL_REPO: ${{ github.event.inputs.kernel_repo || 'https://github.com/LineageOS/android_kernel_oneplus_sm8250' }}
   KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch || 'lineage-23.2' }}
   DEFCONFIG: ${{ github.event.inputs.defconfig || 'vendor/kona-perf_defconfig vendor/oplus.config' }}
-  APPLY_KERNELSU: ${{ github.event.inputs.apply_kernelsu || 'false' }}
-  KSU_SETUP_URL: ${{ github.event.inputs.ksu_setup_url || 'https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/stable/kernel/setup.sh' }}
-  KSU_SETUP_ARG: ${{ github.event.inputs.ksu_setup_arg || 'stable' }}
-  KSU_DIR_NAME: ${{ github.event.inputs.ksu_dir_name || 'KernelSU-Next' }}
-  APPLY_SUSFS: ${{ github.event.inputs.apply_susfs || 'false' }}
-  SUSFS_BRANCH: ${{ github.event.inputs.susfs_branch || 'kernel-4.19' }}
-  SUSFS_KERNEL_PATCH: ${{ github.event.inputs.susfs_kernel_patch || '50_add_susfs_in_kernel-4.19.patch' }}
   KERNEL_LOCAL_VERSION: ${{ github.event.inputs.kernel_local_version || '' }}
 
 jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      # 这一步之前漏掉了:下面 "修复 KernelSU-Next 4.19 内核兼容性" 那一步要用到
-      # 仓库里的 ksu_4.19_compat.patch 文件,但整个 workflow 之前只 clone 了内核/clang/
-      # susfs4ksu,从没把"当前这个仓库自己"(也就是放这份 .yml 和这个 .patch 文件的仓库)
-      # checkout 下来,所以那个文件路径在 runner 上根本不存在,补丁一直没真正生效过。
       - name: 检出当前仓库(拿补丁等文件)
         uses: actions/checkout@v4
 
@@ -120,21 +56,9 @@ jobs:
             xsltproc zip zlib1g-dev python3 python-is-python3 coccinelle
 
       - name: 检出内核源码
-        # actions/checkout 的 repository 参数只接受 "owner/repo" 格式,不接受完整 URL,
-        # 而 KERNEL_REPO 默认值是完整 URL(方便以后换成别的 git host 上的 fork),
-        # 所以这里直接用 git clone,兼容任意 URL。
         run: |
           git clone --depth=1 -b "${KERNEL_BRANCH}" "${KERNEL_REPO}" kernel
 
-      # uname -r 显示的完整版本号 = Makefile 里的 VERSION.PATCHLEVEL.SUBLEVEL(即 4.19.325,
-      # 这三个数字来自源码本身,不建议改) + Makefile 里的 EXTRAVERSION 字段(默认帮你带出了
-      # "-cip132-st16" 这种一大串) + CONFIG_LOCALVERSION 追加的部分 + CONFIG_LOCALVERSION_AUTO
-      # 自动追加的 git hash(格式为 +gxxxxxxx)。
-      #
-      # 要得到 "4.19.325-arrbrants+hash" 这样的效果:
-      # 1. 清空 EXTRAVERSION(去掉 -cip132-st16)
-      # 2. 设置 CONFIG_LOCALVERSION=-arrbrants
-      # 3. 保持 CONFIG_LOCALVERSION_AUTO=y(这样会自动追加 +gxxxxxxx)
       - name: 自定义内核版本号(可选)
         if: ${{ env.KERNEL_LOCAL_VERSION != '' }}
         working-directory: kernel
@@ -154,150 +78,23 @@ jobs:
           echo "USE_CCACHE=1" >> "$GITHUB_ENV"
           echo "CCACHE_EXEC=$(command -v ccache)" >> "$GITHUB_ENV"
 
-      # KernelSU-Next 有两种 hook 模式:
-      # 1. KPROBES_HOOK - 自动 hook,不需要修改内核源码,但需要内核支持 KPROBES
-      # 2. MANUAL_HOOK - 手动 hook,需要在内核源码中手动插入 hook 点
-      #
-      # 这个内核支持 KPROBES (vendor/oplus.config 启用了 CONFIG_KPROBES=y),
-      # 所以直接用 KPROBES_HOOK 模式,不需要 coccinelle 修改源码。
-      # 如果使用 coccinelle 添加手动 hooks,反而会导致冲突。
-
-      - name: 应用 KernelSU-Next(可选)
-        if: ${{ env.APPLY_KERNELSU == 'true' }}
-        working-directory: kernel
-        run: |
-          curl -LSs "${KSU_SETUP_URL}" | bash -s "${KSU_SETUP_ARG}"
-
-      # 不同版本/分支的 KernelSU-Next,kprobes hook 相关的 Kconfig 符号名不完全一样
-      # (见过 KSU_KPROBE_HOOKS / KSU_KPROBES_HOOK / KSU_WITH_KPROBES 这几种写法),
-      # scripts/config -e 对不存在的符号名不会报错,只会悄悄不生效。这里直接从刚
-      # 拉下来的 KernelSU-Next 源码里 grep 真实符号名打印出来,后面 config 那一步
-      # 用的名字如果跟这里打印的对不上,就是没生效的原因。
-      - name: 打印 KernelSU-Next 真实 Kconfig 符号名(调试用)
-        if: ${{ env.APPLY_KERNELSU == 'true' }}
-        working-directory: kernel
-        run: |
-          echo "== 搜索 KPROBE/HOOK 相关 Kconfig 符号 =="
-          grep -rn -i "kprobe\|manual_hook" "${KSU_DIR_NAME}"/kernel/Kconfig 2>/dev/null || \
-            grep -rln -i "kprobe\|manual_hook" "${KSU_DIR_NAME}" --include=Kconfig 2>/dev/null || \
-            echo "没找到 Kconfig 文件,请手动确认 ${KSU_DIR_NAME} 目录结构。"
-
-      # 补丁文件名请确保跟仓库里实际提交的文件名一模一样(这里用的是
-      # ksu_4.19_compat.patch,注意是点不是下划线)。上面加的 checkout 步骤会把它
-      # checkout 到 $GITHUB_WORKSPACE 根目录,working-directory 是 kernel,所以这里
-      # 用 ../ksu_4.19_compat.patch 相对路径去找。
-      - name: 修复 KernelSU-Next 4.19 内核兼容性
-        if: ${{ env.APPLY_KERNELSU == 'true' }}
-        working-directory: kernel
-        run: |
-          if [ -f "../ksu_4.19_compat.patch" ]; then
-            patch -p1 < ../ksu_4.19_compat.patch
-            echo "已应用 KernelSU-Next 4.19 兼容性补丁"
-          else
-            echo "⚠️ 没找到 ../ksu_4.19_compat.patch,这个兼容性补丁没有被应用!"
-            echo "请确认该文件已提交到本仓库根目录,且文件名完全一致(区分大小写/标点)。"
-            ls -la ..
-          fi
-
-      # SUSFS 自动下载并集成。kernel-4.19 分支在 susfs4ksu 官方仓库确实存在,
-      # 但请注意:官方文档里也明确说明非 GKI 内核打这个补丁经常会有 rejected hunks,
-      # 需要手动核对/修复冲突(尤其是 struct 里缺 android_kabi_reservedX 占位字段的情况)。
-      # 也就是说这一步不保证一次成功,CI 报错时请去 Actions 日志里看具体是哪个 .rej 文件、
-      # 手动修好后再提交回内核仓库,而不是无限重跑这个 workflow。
-      #
-      # 另外:KernelSU-Next 较新版本可能已经内置了 susfs 的 hook 支持(不需要额外打
-      # 10_enable_susfs_for_ksu.patch),所以这一步补丁应用失败时先去 KernelSU-Next 里
-      # 搜一下有没有 CONFIG_KSU_SUSFS 相关代码,再判断是不是真的需要这个补丁。
-      - name: 拉取并应用 SUSFS(可选)
-        if: ${{ env.APPLY_SUSFS == 'true' }}
-        run: |
-          git clone --depth=1 -b "${SUSFS_BRANCH}" \
-            https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
-
-          # 1. 拷贝 susfs 的内核态源码文件
-          cp susfs4ksu/kernel_patches/fs/* kernel/fs/ 2>/dev/null || true
-          cp susfs4ksu/kernel_patches/include/linux/* kernel/include/linux/ 2>/dev/null || true
-
-          # 2. 给内核本体打 susfs 补丁
-          cp "susfs4ksu/kernel_patches/${SUSFS_KERNEL_PATCH}" kernel/
-          cd kernel
-          patch -p1 < "${SUSFS_KERNEL_PATCH}"
-          cd ..
-
-          # 3. 给 KernelSU-Next 打启用 susfs 的补丁(需要先执行过上面的 KernelSU 步骤)
-          KSU_DIR="kernel/${KSU_DIR_NAME}"
-          if [ -d "$KSU_DIR" ]; then
-            cp susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch "$KSU_DIR/" 2>/dev/null || true
-            if [ -f "$KSU_DIR/10_enable_susfs_for_ksu.patch" ]; then
-              cd "$KSU_DIR"
-              patch -p1 < 10_enable_susfs_for_ksu.patch || \
-                echo "打补丁失败:KernelSU-Next 可能已经内置 susfs 支持,或者补丁需要手动解决冲突,请查看上面日志。"
-              cd - > /dev/null
-            fi
-          else
-            echo "未发现 $KSU_DIR 目录:请确认已开启 apply_kernelsu,且 ksu_dir_name 和 setup.sh 实际拉取的目录名一致。"
-          fi
-
       - name: 生成 defconfig
         working-directory: kernel
-        # 不加引号是有意的:DEFCONFIG 里空格分隔的多个 config(比如
-        # "vendor/kona-perf_defconfig vendor/oplus.config")需要被当成多个独立参数传给 make,
-        # 才会按 kbuild 的 fragment 合并方式依次叠加,而不是被当成一个不存在的文件名。
         run: |
           make O=${OUT_DIR} ARCH=${ARCH} CC=clang ${DEFCONFIG}
 
-      # defconfig 本身大概率不会带 CONFIG_KSU / CONFIG_KSU_SUSFS,需要在编译前手动打开。
-      # KSU_SUSFS_* 各个子功能开关按需增删,这里只启用了最常用的一批。
-      #
-      # 关于 CONFIG_LOCALVERSION_AUTO:
-      # - 启用时:内核会自动在版本号后面追加 git 信息(+gxxxxxxx 或 +gxxxxxxx-dirty)
-      # - 禁用时:版本号只包含 EXTRAVERSION + CONFIG_LOCALVERSION,不带 git hash
-      # 这里保持 CONFIG_LOCALVERSION_AUTO 启用,这样最终版本号格式为:
-      # 4.19.325-arrbrants+gxxxxxxx (清爽且能追溯 git commit)
-      - name: 应用自定义配置(KernelSU-Next / SUSFS / 版本号)
-        if: ${{ env.APPLY_KERNELSU == 'true' || env.APPLY_SUSFS == 'true' || env.KERNEL_LOCAL_VERSION != '' }}
+      - name: 应用自定义配置(版本号)
+        if: ${{ env.KERNEL_LOCAL_VERSION != '' }}
         working-directory: kernel
         run: |
           CONFIG="./scripts/config --file ${OUT_DIR}/.config"
-          if [ "${APPLY_KERNELSU}" = "true" ]; then
-            $CONFIG -e KSU
-
-            # KSU_KPROBES_HOOK 需要以下依赖项:
-            # 1. KPROBES (已在 vendor/oplus.config 中启用)
-            # 2. KRETPROBES (需要显式启用)
-            # 3. HAVE_SYSCALL_TRACEPOINTS (架构特性,arm64 支持)
-            # 4. KSU_MANUAL_HOOK 必须禁用
-
-            # 启用 KRETPROBES (KPROBES 的扩展)
-            $CONFIG -e KRETPROBES
-
-            # 明确禁用 KSU_MANUAL_HOOK,确保可以使用 KPROBES_HOOK
-            $CONFIG -d KSU_MANUAL_HOOK
-
-            # 启用 KSU_KPROBES_HOOK
-            $CONFIG -e KSU_KPROBES_HOOK
-          fi
-          if [ "${APPLY_SUSFS}" = "true" ]; then
-            $CONFIG -e KSU_SUSFS
-            $CONFIG -e KSU_SUSFS_SUS_PATH
-            $CONFIG -e KSU_SUSFS_SUS_MOUNT
-            $CONFIG -e KSU_SUSFS_SUS_KSTAT
-            $CONFIG -e KSU_SUSFS_TRY_UMOUNT
-          fi
-          if [ -n "${KERNEL_LOCAL_VERSION}" ]; then
-            # 保持 LOCALVERSION_AUTO 启用,这样会自动追加 git hash (+gxxxxxxx)
-            $CONFIG -e LOCALVERSION_AUTO
-            $CONFIG --set-str LOCALVERSION "${KERNEL_LOCAL_VERSION}"
-          fi
+          $CONFIG -e LOCALVERSION_AUTO
+          $CONFIG --set-str LOCALVERSION "${KERNEL_LOCAL_VERSION}"
           make O=${OUT_DIR} ARCH=${ARCH} CC=clang olddefconfig
-
-          echo "== 最终生效的 KSU/KPROBES 相关配置(核对有没有被静默丢弃)=="
-          grep -E "CONFIG_KSU|CONFIG_KPROBES|CONFIG_KRETPROBES" ${OUT_DIR}/.config || echo "(没有匹配到任何相关配置项,说明前面 -e/-d 用的符号名可能是错的)"
 
       - name: 编译内核
         working-directory: kernel
         run: |
-          # proton-clang 自带的交叉编译前缀是 aarch64-linux-gnu- / arm-linux-androideabi-
           make -j"$(nproc --all)" O=${OUT_DIR} ARCH=${ARCH} \
             CC="ccache clang" \
             CLANG_TRIPLE=aarch64-linux-gnu- \
