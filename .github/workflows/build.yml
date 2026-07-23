@@ -1,249 +1,109 @@
-name: Build kebab kernel
+name: Build OnePlus SM8250 Kernel
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
-    inputs:
-      kernel_repo:
-        description: "内核源码仓库地址"
-        required: true
-        default: "https://github.com/LineageOS/android_kernel_oneplus_sm8250"
-      kernel_branch:
-        description: "内核源码分支"
-        required: true
-        default: "lineage-23.2"
-      defconfig:
-        description: "defconfig 名称,空格分隔可传多个一起合并(比如加上 vendor/oplus.config)"
-        required: true
-        default: "vendor/kona-perf_defconfig vendor/oplus.config"
-      kernel_local_version:
-        description: "自定义内核版本后缀,带前导 -,比如填 -MyKernel 会让 uname -r 显示成 4.19.325-MyKernel(会清空原本 cip132-st16-perf 那一长串);留空则保留仓库原本的版本字符串"
-        required: false
-        default: ""
-      enable_ksu_next:
-        description: "是否集成 KernelSU-Next"
-        required: true
-        type: boolean
-        default: true
-      ksu_source:
-        description: "KernelSU-Next 源码来源:community_419(社区 4.19 专用 fork,推荐)/ official_stable / official_dev(这两个官方源在 kebab 4.19 上已实测因 infra/file_wrapper.c 编译失败)"
-        required: true
-        type: choice
-        options:
-          - community_419
-          - official_stable
-          - official_dev
-        default: community_419
-      ksu_community_repo:
-        description: "ksu_source=community_419 时使用的仓库地址"
-        required: false
-        default: "https://github.com/wshamroukh/KernelSU-Next-SUSFS-kernelv4.19"
-      ksu_community_branch:
-        description: "ksu_source=community_419 时使用的分支"
-        required: false
-        default: "legacy"
-      hook_mode:
-        description: "Hook 方式:kprobe(推荐先试)/ manual"
-        required: true
-        type: choice
-        options:
-          - kprobe
-          - manual
-        default: kprobe
-      kprobe_test_mode:
-        description: "诊断用:注释掉 kprobe hook 初始化后编一份'裸内核'测试用,不要日常使用"
-        required: true
-        type: boolean
-        default: false
-
-env:
-  ARCH: arm64
-  OUT_DIR: out
-  CLANG_REPO: https://github.com/kdrag0n/proton-clang.git
-  CLANG_BRANCH: master
-  CLANG_DIR: clang
-  KERNEL_REPO: ${{ github.event.inputs.kernel_repo || 'https://github.com/LineageOS/android_kernel_oneplus_sm8250' }}
-  KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch || 'lineage-23.2' }}
-  DEFCONFIG: ${{ github.event.inputs.defconfig || 'vendor/kona-perf_defconfig vendor/oplus.config' }}
-  KERNEL_LOCAL_VERSION: ${{ github.event.inputs.kernel_local_version || '' }}
-  ENABLE_KSU_NEXT: ${{ github.event.inputs.enable_ksu_next || 'true' }}
-  KSU_SOURCE: ${{ github.event.inputs.ksu_source || 'community_419' }}
-  KSU_COMMUNITY_REPO: ${{ github.event.inputs.ksu_community_repo || 'https://github.com/wshamroukh/KernelSU-Next-SUSFS-kernelv4.19' }}
-  KSU_COMMUNITY_BRANCH: ${{ github.event.inputs.ksu_community_branch || 'legacy' }}
-  HOOK_MODE: ${{ github.event.inputs.hook_mode || 'kprobe' }}
-  KPROBE_TEST_MODE: ${{ github.event.inputs.kprobe_test_mode || 'false' }}
-  CCACHE_DIR: ${{ github.workspace }}/.ccache
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+
+    env:
+      ARCH: arm64
+      SUBARCH: arm64
+      LLVM: 1
+      LLVM_IAS: 1
+
     steps:
-      - name: 检出当前仓库(拿补丁等文件)
+      - name: Checkout source
         uses: actions/checkout@v4
-
-      - name: 释放磁盘空间
-        run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
-
-      - name: 安装编译依赖
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
-            git gnupg gperf lib32ncurses5-dev lib32readline-dev lib32z1-dev \
-            libelf-dev libssl-dev liblz4-tool libncurses5-dev libsdl1.2-dev \
-            libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools \
-            xsltproc zip zlib1g-dev python3 python-is-python3 coccinelle
-
-      - name: 缓存 ccache
-        uses: actions/cache@v4
         with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ccache-${{ runner.os }}-${{ env.KERNEL_REPO }}-${{ env.KERNEL_BRANCH }}-${{ env.DEFCONFIG }}-${{ env.KSU_SOURCE }}-${{ env.HOOK_MODE }}-${{ github.run_id }}
-          restore-keys: |
-            ccache-${{ runner.os }}-${{ env.KERNEL_REPO }}-${{ env.KERNEL_BRANCH }}-${{ env.DEFCONFIG }}-${{ env.KSU_SOURCE }}-${{ env.HOOK_MODE }}-
-            ccache-${{ runner.os }}-${{ env.KERNEL_REPO }}-${{ env.KERNEL_BRANCH }}-${{ env.DEFCONFIG }}-
-            ccache-${{ runner.os }}-${{ env.KERNEL_REPO }}-${{ env.KERNEL_BRANCH }}-
-            ccache-${{ runner.os }}-
+          fetch-depth: 1
 
-      - name: 缓存 clang 工具链
-        id: cache-clang
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.CLANG_DIR }}
-          key: clang-${{ env.CLANG_REPO }}-${{ env.CLANG_BRANCH }}
-
-      - name: 检出内核源码
+      - name: Install dependencies
         run: |
-          git clone --depth=1 -b "${KERNEL_BRANCH}" "${KERNEL_REPO}" kernel
+          sudo apt update
 
-      - name: 自定义内核版本号(可选)
-        if: ${{ env.KERNEL_LOCAL_VERSION != '' }}
-        working-directory: kernel
+          sudo apt install -y \
+            bc \
+            bison \
+            flex \
+            build-essential \
+            libssl-dev \
+            libelf-dev \
+            libncurses-dev \
+            python3 \
+            rsync \
+            cpio \
+            lz4 \
+            zip
+
+      # GitHub runner 默认磁盘比较紧张
+      - name: Free disk space
         run: |
-          sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION =/' Makefile
-          grep '^EXTRAVERSION' Makefile
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
 
-      # ---- 集成 KernelSU-Next ----
-      - name: 集成 KernelSU-Next
-        if: ${{ env.ENABLE_KSU_NEXT == 'true' }}
-        working-directory: kernel
+      - name: Setup Android clang
         run: |
-          case "${KSU_SOURCE}" in
-            community_419)
-              echo "使用社区 4.19 专用整合 fork: ${KSU_COMMUNITY_REPO}@${KSU_COMMUNITY_BRANCH}"
-              git clone --depth=1 -b "${KSU_COMMUNITY_BRANCH}" "${KSU_COMMUNITY_REPO}" KernelSU-Next-Community
+          git clone --depth=1 \
+            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
+            $HOME/clang
 
-              if [ ! -d "KernelSU-Next-Community/kernel" ]; then
-                echo "::error::${KSU_COMMUNITY_REPO}@${KSU_COMMUNITY_BRANCH} 里没有 kernel/ 子目录,这个 fork 的目录结构和官方 KernelSU-Next 不一样,需要人工确认实际驱动源码路径后再改脚本"
-                ls -la KernelSU-Next-Community
-                exit 1
-              fi
+          echo "$HOME/clang/clang-r399163b/bin" >> $GITHUB_PATH
 
-              # 跟官方 setup.sh 一样,软链接仓库里的 kernel/ 子目录当作 drivers/kernelsu
-              ln -sf "$(realpath --relative-to=drivers "$(pwd)/KernelSU-Next-Community/kernel")" drivers/kernelsu
 
-              grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig || \
-                sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-              grep -q 'kernelsu' drivers/Makefile || \
-                printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> drivers/Makefile
-              ;;
-            official_dev)
-              echo "官方 dev 分支(已知在本内核上因 infra/file_wrapper.c 编译失败)"
-              curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s dev
-              ;;
-            *)
-              echo "官方最新 stable tag(已知在本内核上因 infra/file_wrapper.c 编译失败)"
-              curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s stable
-              ;;
-          esac
-
-      # ---- 诊断:测试 kprobe 是否在本机内核可用 ----
-      - name: 诊断模式:注释掉 kprobe hook 初始化
-        if: ${{ env.ENABLE_KSU_NEXT == 'true' && env.HOOK_MODE == 'kprobe' && env.KPROBE_TEST_MODE == 'true' }}
-        working-directory: kernel
+      - name: Check compiler
         run: |
-          FILE=$(grep -rl "ksu_sucompat_init" --include=*.c . | head -n1)
-          if [ -z "$FILE" ]; then
-            echo "::error::没找到 ksu_sucompat_init 调用点,需要手动确认后再测试"
-            exit 1
-          fi
-          echo "将在 $FILE 里注释掉 ksu_sucompat_init() / ksu_ksud_init() 调用"
-          sed -i -E 's/^([[:space:]]*)(ksu_sucompat_init\(\);)/\1\/\/\2/' "$FILE"
-          sed -i -E 's/^([[:space:]]*)(ksu_ksud_init\(\);)/\1\/\/\2/' "$FILE"
-          grep -n "ksu_sucompat_init\|ksu_ksud_init" "$FILE"
-          echo "::notice::这次产物用于测试:刷入后能正常开机说明 kprobe 在本机是坏的,应改用 hook_mode=manual;开机异常说明 kprobe 正常"
+          clang --version
+          ld.lld --version
 
-      - name: 拉取 clang 工具链
-        if: steps.cache-clang.outputs.cache-hit != 'true'
+
+      - name: Prepare kernel config
         run: |
-          git clone --depth=1 -b "${CLANG_BRANCH}" "${CLANG_REPO}" "${CLANG_DIR}"
 
-      - name: 添加 clang 到 PATH
+          mkdir -p out
+
+          make \
+            O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            vendor/kona_defconfig
+
+
+      - name: Build kernel
         run: |
-          echo "$(pwd)/${CLANG_DIR}/bin" >> "$GITHUB_PATH"
 
-      - name: 启用 ccache
+          make \
+            O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            -j$(nproc)
+
+
+      - name: Collect output
         run: |
-          ccache -M 5G
-          echo "USE_CCACHE=1" >> "$GITHUB_ENV"
-          echo "CCACHE_EXEC=$(command -v ccache)" >> "$GITHUB_ENV"
 
-      - name: 生成 defconfig
-        working-directory: kernel
-        run: |
-          make O=${OUT_DIR} ARCH=${ARCH} CC=clang ${DEFCONFIG}
-
-      - name: 应用自定义配置(版本号 / KernelSU-Next)
-        if: ${{ env.KERNEL_LOCAL_VERSION != '' || env.ENABLE_KSU_NEXT == 'true' }}
-        working-directory: kernel
-        run: |
-          CONFIG="./scripts/config --file ${OUT_DIR}/.config"
-
-          if [ -n "${KERNEL_LOCAL_VERSION}" ]; then
-            $CONFIG -e LOCALVERSION_AUTO
-            $CONFIG --set-str LOCALVERSION "${KERNEL_LOCAL_VERSION}"
-          fi
-
-          if [ "${ENABLE_KSU_NEXT}" = "true" ]; then
-            $CONFIG -e KSU
-            $CONFIG -e OVERLAY_FS
-            $CONFIG -e MODULES
-            $CONFIG -e MODULE_UNLOAD
-
-            if [ "${HOOK_MODE}" = "manual" ]; then
-              $CONFIG -e KSU_MANUAL_HOOK
-            else
-              $CONFIG -e KPROBES
-              $CONFIG -e HAVE_KPROBES
-              $CONFIG -e KPROBE_EVENTS
-            fi
-          fi
-
-          make O=${OUT_DIR} ARCH=${ARCH} CC=clang olddefconfig
-
-      - name: 编译内核
-        working-directory: kernel
-        run: |
-          make -j"$(nproc --all)" O=${OUT_DIR} ARCH=${ARCH} \
-            CC="ccache clang" \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-            LLVM=1 LLVM_IAS=1
-
-      - name: 收集产物
-        run: |
           mkdir -p artifacts
-          cp kernel/${OUT_DIR}/arch/arm64/boot/Image artifacts/ 2>/dev/null || true
-          cp kernel/${OUT_DIR}/arch/arm64/boot/Image.gz-dtb artifacts/ 2>/dev/null || true
-          cp kernel/${OUT_DIR}/arch/arm64/boot/dtbo.img artifacts/ 2>/dev/null || true
-          ls -la artifacts
 
-      - name: 上传编译产物
+          cp out/.config artifacts/kernel.config
+
+          cp out/arch/arm64/boot/Image \
+            artifacts/ 2>/dev/null || true
+
+          cp out/arch/arm64/boot/Image.gz \
+            artifacts/ 2>/dev/null || true
+
+          cp out/arch/arm64/boot/Image.lz4 \
+            artifacts/ 2>/dev/null || true
+
+          cp out/arch/arm64/boot/Image.lz4-dtb \
+            artifacts/ 2>/dev/null || true
+
+
+      - name: Upload kernel
         uses: actions/upload-artifact@v4
         with:
-          name: kebab-kernel-${{ github.run_number }}
-          path: artifacts/*
-          if-no-files-found: error
+          name: oneplus-sm8250-kernel
+          path: artifacts
